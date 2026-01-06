@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Agent - AI Assistant</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="voice-agent-container">
+    <!-- Header -->
+    <div class="agent-header">
+      <div class="header-left">
+        <div class="agent-avatar">
+          <div class="avatar-circle">
+            <svg class="microphone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </div>
+          <div class="agent-info">
+            <h1 class="agent-name">Conversational Voice Agent</h1>
+            <p class="agent-status" id="agentStatus">Ready to listen</p>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="user-badge">
+          <span class="user-icon">👤</span>
+          <span id="usernameDisplay"></span>
+        </div>
+        <button id="logoutBtn" class="btn-logout">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Logout
+        </button>
+      </div>
+    </div>
+
+    <!-- Browser Warning -->
+    <div class="browser-warning" id="browserWarning" style="display: none;">
+      <strong>⚠️ Browser Compatibility Notice:</strong>
+      <p id="browserMessage"></p>
+    </div>
+
+    <!-- Main Voice Interface -->
+    <div class="voice-interface">
+      <!-- Voice Visualizer -->
+      <div class="voice-visualizer" id="voiceVisualizer">
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring pulse-delay-1"></div>
+        <div class="pulse-ring pulse-delay-2"></div>
+        <button id="voiceButton" class="voice-button">
+          <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"></path>
+          </svg>
+          <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+            <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Conversation Display -->
+      <div class="conversation-container">
+        <div id="transcription" class="conversation-messages">
+          <div class="welcome-message">
+            <div class="welcome-icon">🎙️</div>
+            <h2>Welcome to Conversational Voice Agent</h2>
+            <p>Click the microphone button below to start your conversation</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Control Buttons (Alternative) -->
+      <div class="control-panel" style="display: none;">
+        <button id="startBtn" class="btn btn-start">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polygon points="10 8 16 12 10 16 10 8"></polygon>
+          </svg>
+          Start Conversation
+        </button>
+        <button id="stopBtn" class="btn btn-stop" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <rect x="9" y="9" width="6" height="6"></rect>
+          </svg>
+          Stop
+        </button>
+      </div>
+    </div>
+
+    <!-- Footer Info -->
+    <div class="agent-footer">
+      <div class="footer-info">
+        <span class="info-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          You can interrupt the assistant at any time by speaking
+        </span>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // Check if user is logged in
+    const username = sessionStorage.getItem('username');
+    if (!username) {
+      window.location.href = 'login.html';
+    } else {
+      document.getElementById('usernameDisplay').textContent = username;
+    }
+
+    // Logout functionality
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      sessionStorage.clear();
+      window.location.href = 'login.html';
+    });
+  </script>
+  <script src="script.js"></script>
+</body>
+</html>
