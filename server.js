@@ -33,7 +33,6 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // Serve static files from client directory
-// Works for both local (../client) and production (./client)
 const clientPath = fs.existsSync('../client') ? '../client' : './client';
 app.use(express.static(clientPath));
 console.log(`📁 Serving static files from: ${clientPath}`);
@@ -45,10 +44,10 @@ let supabase;
 
 // Connection retry configuration
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000; // 2 seconds
+const RETRY_DELAY = 2000;
 
 // Track active sessions to prevent duplicates
-const activeSessions = new Map(); // sessionId -> { username, conversationId, lastSaveTime, messageCount }
+const activeSessions = new Map();
 
 // Helper function to retry operations
 async function retryOperation(operation, retries = MAX_RETRIES) {
@@ -73,34 +72,28 @@ try {
 
 // Function to save conversation to Supabase with deduplication
 async function saveConversation(username, conversationId, messages, sessionId = null, forceImmediate = false) {
-  // Skip if no messages to save
   if (!messages || messages.length === 0) {
     console.log('⏭️ No messages to save');
     return;
   }
 
-  // Deduplication check using session tracking (unless force immediate)
   if (!forceImmediate && sessionId && activeSessions.has(sessionId)) {
     const session = activeSessions.get(sessionId);
     const now = Date.now();
     
-    // Don't save if same message count (no new messages)
     if (session.messageCount === messages.length) {
       console.log(`⏭️ Skipped save (no new messages): ${username}_C`);
       return;
     }
     
-    // Debounce: Don't save if last save was less than 1 second ago (reduced from 2s)
     if (session.lastSaveTime && (now - session.lastSaveTime) < 1000) {
       console.log(`⏭️ Skipped save (debounce): ${username}_C`);
       return;
     }
     
-    // Update session info
     session.messageCount = messages.length;
     session.lastSaveTime = now;
   } else if (sessionId) {
-    // Register new session
     activeSessions.set(sessionId, {
       username,
       conversationId,
@@ -112,7 +105,7 @@ async function saveConversation(username, conversationId, messages, sessionId = 
   const conversationData = {
     username: username,
     conversation_id: conversationId,
-    condition: 'C', // C for Conversational (voice assistant)
+    condition: 'C',
     timestamp: new Date().toISOString(),
     messages: messages,
     total_messages: messages.length,
@@ -121,9 +114,7 @@ async function saveConversation(username, conversationId, messages, sessionId = 
   
   try {
     if (supabase) {
-      // Use retry mechanism for network resilience
       await retryOperation(async () => {
-        // Check if conversation exists
         const { data: existing, error: selectError } = await supabase
           .from('conversations')
           .select('id, total_messages')
@@ -131,13 +122,11 @@ async function saveConversation(username, conversationId, messages, sessionId = 
           .eq('conversation_id', conversationId)
           .single();
 
-        // Handle no results (not an error)
         if (selectError && selectError.code !== 'PGRST116') {
           throw selectError;
         }
 
         if (existing) {
-          // Only update if we have more messages (prevents duplicates)
           if (messages.length > (existing.total_messages || 0)) {
             const { error: updateError } = await supabase
               .from('conversations')
@@ -151,13 +140,11 @@ async function saveConversation(username, conversationId, messages, sessionId = 
             console.log(`⏭️ Skipped update (no new messages): ${username}_C`);
           }
         } else {
-          // Insert new conversation
           const { error: insertError } = await supabase
             .from('conversations')
             .insert([conversationData]);
           
           if (insertError) {
-            // Check if it's a duplicate key error
             if (insertError.code === '23505') {
               console.log(`⚠️ Conversation already exists (race condition avoided): ${username}_C`);
             } else {
@@ -169,12 +156,10 @@ async function saveConversation(username, conversationId, messages, sessionId = 
         }
       });
     } else {
-      // Fallback to local file storage
       saveFallbackLocal(username, conversationId, conversationData);
     }
   } catch (error) {
     console.error('❌ Error saving conversation:', error);
-    // Fallback to local storage on error
     saveFallbackLocal(username, conversationId, conversationData);
   }
 }
@@ -188,7 +173,6 @@ function saveFallbackLocal(username, conversationId, conversationData) {
     }
     const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
     
-    // Check if file exists and has same or more messages (prevent duplicates)
     if (fs.existsSync(filename)) {
       const existing = JSON.parse(fs.readFileSync(filename));
       if (existing.total_messages >= conversationData.total_messages) {
@@ -207,7 +191,6 @@ function saveFallbackLocal(username, conversationId, conversationData) {
 wss.on('connection', async (clientWs) => {
   console.log('Client connected');
   
-  // Conversation tracking
   let username = null;
   let conversationId = null;
   let sessionId = null;
@@ -219,8 +202,8 @@ wss.on('connection', async (clientWs) => {
   let currentResponseId = null;
   let currentAssistantMessage = { role: 'assistant', content: '', timestamp: null, interrupted: false };
   let isReconnection = false;
+  let microphoneReady = false; // NEW: Track if microphone is ready
   
-  // Auto-save interval - save every 10 seconds if there are unsaved changes
   let lastSavedMessageCount = 0;
   const autoSaveInterval = setInterval(() => {
     if (conversationMessages.length > lastSavedMessageCount && username && conversationId) {
@@ -228,23 +211,55 @@ wss.on('connection', async (clientWs) => {
       saveConversation(username, conversationId, conversationMessages, sessionId, false);
       lastSavedMessageCount = conversationMessages.length;
     }
-  }, 10000); // Every 10 seconds
+  }, 10000);
 
   clientWs.on('message', async (message) => {
     const msg = JSON.parse(message);
 
+    // NEW: Microphone ready signal from client
+    if (msg.type === 'microphone_ready') {
+      microphoneReady = true;
+      console.log('🎤 Microphone permission granted and ready');
+      
+      // Send greeting ONLY after microphone is ready
+      if (openaiWs && openaiWs.readyState === 1 && !isReconnection && !msg.hasMessages) {
+        console.log('🎤 Sending initial greeting (microphone ready)');
+        setTimeout(() => {
+          openaiWs.send(JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'user',
+              content: [
+                {
+                  type: 'input_text',
+                  text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?"'
+                }
+              ]
+            }
+          }));
+          
+          openaiWs.send(JSON.stringify({
+            type: 'response.create',
+            response: {
+              modalities: ['text', 'audio']
+            }
+          }));
+        }, 300);
+      }
+      return;
+    }
+
     // Start the session
     if (msg.type === 'start') {
-      // Capture username and session info from client
       username = msg.username || 'anonymous';
       sessionId = msg.sessionId || Date.now();
-      conversationId = msg.conversationId || sessionId; // Use provided conversationId
+      conversationId = msg.conversationId || sessionId;
       isReconnection = msg.isReconnection || false;
-      const hasMessages = msg.hasMessages || false; // Check if client has conversation history
+      const hasMessages = msg.hasMessages || false;
       
       console.log(`👤 User: ${username} | Session: ${sessionId} | Conversation: ${conversationId} | Reconnection: ${isReconnection} | Has Messages: ${hasMessages}`);
       
-      // Use existing conversationId if reconnecting, otherwise use provided one
       if (activeSessions.has(sessionId)) {
         const existingConversationId = activeSessions.get(sessionId).conversationId;
         console.log(`🔄 Reconnecting to existing conversation: ${existingConversationId}`);
@@ -326,85 +341,26 @@ Do Not Respond with more than 1-3 sentences or Questions
           }
         }));
 
-        // Send initial greeting based on connection type
-        if (!isReconnection && !hasMessages) {
-          // First time ever OR new session after stop - initial greeting
-          setTimeout(() => {
-            console.log('🎤 Sending initial greeting (first time or new session)');
-            openaiWs.send(JSON.stringify({
-              type: 'conversation.item.create',
-              item: {
-                type: 'message',
-                role: 'user',
-                content: [
-                  {
-                    type: 'input_text',
-                    text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?'
-                  }
-                ]
-              }
-            }));
-            
-            // Trigger response generation
-            openaiWs.send(JSON.stringify({
-              type: 'response.create',
-              response: {
-                modalities: ['text', 'audio']
-              }
-            }));
-          }, 500);
-        } else if (hasMessages && !isReconnection) {
-          // This shouldn't happen anymore since we clear persistentConversationId on manual stop
-          // But keeping as fallback
-          setTimeout(() => {
-            console.log('👋 Sending welcome back message (fallback)');
-            openaiWs.send(JSON.stringify({
-              type: 'conversation.item.create',
-              item: {
-                type: 'message',
-                role: 'user',
-                content: [
-                  {
-                    type: 'input_text',
-                    text: 'Say "Welcome back! Ready to continue?" in a friendly tone.'
-                  }
-                ]
-              }
-            }));
-            
-            // Trigger response generation
-            openaiWs.send(JSON.stringify({
-              type: 'response.create',
-              response: {
-                modalities: ['text', 'audio']
-              }
-            }));
-          }, 500);
-        } else {
-          console.log('🔄 Auto-reconnection - no greeting');
-        }
+        // DO NOT send greeting here - wait for microphone_ready signal
+        console.log('⏸️ Waiting for microphone permission before greeting...');
       });
 
       openaiWs.on('message', (data) => {
         const event = JSON.parse(data.toString());
         
-        // Log important events (excluding audio deltas)
         if (event.type && !event.type.includes('audio.delta') && !event.type.includes('input_audio_buffer.append')) {
           console.log('Event:', event.type);
         }
 
-        // User started speaking - INTERRUPT if assistant is responding
         if (event.type === 'input_audio_buffer.speech_started') {
           console.log('🎤 User started speaking');
           
           if (activeResponse && currentResponseId) {
             console.log('⚠️ Interrupting current response:', currentResponseId);
             
-            // Mark current message as interrupted
             currentAssistantMessage.interrupted = true;
             currentAssistantMessage.content += '...';
             
-            // Save the interrupted message
             conversationMessages.push({
               sequence: messageSequence++,
               role: currentAssistantMessage.role,
@@ -413,36 +369,29 @@ Do Not Respond with more than 1-3 sentences or Questions
               interrupted: true
             });
             
-            // CRITICAL: Save immediately after interruption (force)
             if (username) {
               saveConversation(username, conversationId, conversationMessages, sessionId, true);
             }
             
-            // Cancel the current response
             openaiWs.send(JSON.stringify({
               type: 'response.cancel'
             }));
             
-            // Notify client that response was interrupted
             clientWs.send(JSON.stringify({ type: 'response_interrupted' }));
             activeResponse = false;
             currentResponseId = null;
             
-            // Reset current assistant message
             currentAssistantMessage = { role: 'assistant', content: '', timestamp: null, interrupted: false };
           }
         }
 
-        // User stopped speaking
         if (event.type === 'input_audio_buffer.speech_stopped') {
           console.log('🔇 User stopped speaking');
         }
 
-        // Transcription completed
         if (event.type === 'conversation.item.input_audio_transcription.completed') {
           console.log('📝 Transcription:', event.transcript);
           
-          // Save user message
           conversationMessages.push({
             sequence: messageSequence++,
             role: 'user',
@@ -450,7 +399,6 @@ Do Not Respond with more than 1-3 sentences or Questions
             timestamp: new Date().toISOString()
           });
           
-          // CRITICAL: Save immediately after user message (force)
           if (username) {
             saveConversation(username, conversationId, conversationMessages, sessionId, true);
           }
@@ -458,13 +406,11 @@ Do Not Respond with more than 1-3 sentences or Questions
           clientWs.send(JSON.stringify({ type: 'user_transcription', text: event.transcript }));
         }
 
-        // Response created (assistant is starting to generate)
         if (event.type === 'response.created') {
           console.log('🤖 Response created:', event.response.id);
           activeResponse = true;
           currentResponseId = event.response.id;
           
-          // Initialize new assistant message
           currentAssistantMessage = {
             role: 'assistant',
             content: '',
@@ -473,23 +419,19 @@ Do Not Respond with more than 1-3 sentences or Questions
           };
         }
 
-        // Stream assistant text deltas (faster - comes before audio transcript)
         if (event.type === 'response.text.delta') {
           currentAssistantMessage.content += event.delta;
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_delta', text: event.delta }));
         }
         
-        // Stream assistant audio transcript deltas
         if (event.type === 'response.audio_transcript.delta') {
           currentAssistantMessage.content += event.delta;
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_delta', text: event.delta }));
         }
 
-        // Complete audio transcript (fallback for missing text)
         if (event.type === 'response.audio_transcript.done') {
           console.log('✅ Audio transcript complete:', event.transcript);
           
-          // Use complete transcript if longer
           if (event.transcript.length > currentAssistantMessage.content.length) {
             currentAssistantMessage.content = event.transcript;
           }
@@ -500,18 +442,15 @@ Do Not Respond with more than 1-3 sentences or Questions
           }));
         }
 
-        // Stream assistant AUDIO deltas (TTS)
         if (event.type === 'response.audio.delta') {
           clientWs.send(JSON.stringify({ type: 'assistant_audio_delta', audio: event.delta }));
         }
 
-        // Response done
         if (event.type === 'response.done') {
           console.log('✅ Response completed');
           activeResponse = false;
           currentResponseId = null;
           
-          // Save completed assistant message
           if (currentAssistantMessage.content.trim() !== '') {
             conversationMessages.push({
               sequence: messageSequence++,
@@ -521,36 +460,30 @@ Do Not Respond with more than 1-3 sentences or Questions
               interrupted: false
             });
             
-            // CRITICAL: Save immediately after assistant response (force)
             if (username) {
               saveConversation(username, conversationId, conversationMessages, sessionId, true);
             }
           }
           
-          // Reset current assistant message
           currentAssistantMessage = { role: 'assistant', content: '', timestamp: null, interrupted: false };
           
           clientWs.send(JSON.stringify({ type: 'response_complete' }));
         }
 
-        // Response cancelled (due to interruption)
         if (event.type === 'response.cancelled') {
           console.log('❌ Response cancelled');
           activeResponse = false;
           currentResponseId = null;
         }
 
-        // Error handling
         if (event.type === 'error') {
           console.error('❌ OpenAI API Error:', event.error);
           
-          // Reset state on error
           if (event.error.type === 'invalid_request_error') {
             activeResponse = false;
             currentResponseId = null;
           }
           
-          // Don't send buffer errors to client
           if (!event.error.message.includes('buffer too small') && 
               !event.error.message.includes('active response')) {
             clientWs.send(JSON.stringify({ type: 'error', message: event.error.message }));
@@ -573,7 +506,6 @@ Do Not Respond with more than 1-3 sentences or Questions
       openaiWs.on('close', () => {
         console.log('OpenAI connection closed');
         
-        // CRITICAL: Final save when connection closes (force immediate)
         if (conversationMessages.length > 0 && username) {
           saveConversation(username, conversationId, conversationMessages, sessionId, true);
           console.log(`📊 Final conversation stats for ${username}: ${conversationMessages.length} messages`);
@@ -581,18 +513,15 @@ Do Not Respond with more than 1-3 sentences or Questions
       });
     }
 
-    // Append audio
     if (msg.type === 'audio' && openaiWs && openaiWs.readyState === 1) {
       openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: msg.audio }));
     }
 
-    // Stop message - save and prepare for next session
     if (msg.type === 'stop') {
       const requestNewSession = msg.requestNewSession || false;
       
       console.log(`🛑 Stop received (New session requested: ${requestNewSession})`);
       
-      // CRITICAL: Save current conversation before closing (force immediate)
       if (conversationMessages.length > 0 && username && conversationId) {
         console.log(`💾 Saving conversation before stop: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
         await saveConversation(username, conversationId, conversationMessages, sessionId, true);
@@ -601,7 +530,6 @@ Do Not Respond with more than 1-3 sentences or Questions
         console.log('⚠️ No messages to save on stop');
       }
       
-      // If requesting new session, remove from active sessions to force new row
       if (requestNewSession && sessionId) {
         activeSessions.delete(sessionId);
         console.log(`🆕 Session ${sessionId} removed - next start will create NEW row`);
@@ -612,7 +540,6 @@ Do Not Respond with more than 1-3 sentences or Questions
       }
     }
     
-    // Emergency save request from client
     if (msg.type === 'emergency_save') {
       console.log('🚨 Emergency save requested by client');
       if (conversationMessages.length > 0 && username && conversationId) {
@@ -624,27 +551,23 @@ Do Not Respond with more than 1-3 sentences or Questions
   clientWs.on('close', () => {
     console.log('Client disconnected');
     
-    // Clear auto-save interval
     if (autoSaveInterval) {
       clearInterval(autoSaveInterval);
     }
     
-    // CRITICAL: Save conversation when client disconnects (force immediate)
     if (conversationMessages.length > 0 && username && conversationId) {
       console.log(`💾 Final save on disconnect: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
       saveConversation(username, conversationId, conversationMessages, sessionId, true);
       console.log(`📊 Final conversation stats for ${username}: ${conversationMessages.length} messages`);
     }
     
-    // Clean up session after a SHORT delay (5 seconds) to allow quick reconnections
-    // but not so long that it prevents new sessions
     if (sessionId) {
       setTimeout(() => {
         if (activeSessions.has(sessionId)) {
           activeSessions.delete(sessionId);
           console.log(`🧹 Session cleaned up after disconnect: ${sessionId}`);
         }
-      }, 5000); // Reduced from 60 seconds to 5 seconds
+      }, 5000);
     }
     
     if (openaiWs) openaiWs.close();
@@ -653,7 +576,6 @@ Do Not Respond with more than 1-3 sentences or Questions
   clientWs.on('error', (err) => {
     console.error('Client WebSocket Error:', err.message);
     
-    // CRITICAL: Save on error before potential crash (force immediate)
     if (conversationMessages.length > 0 && username && conversationId) {
       console.log('⚠️ Emergency save due to client error');
       saveConversation(username, conversationId, conversationMessages, sessionId, true);
@@ -661,7 +583,6 @@ Do Not Respond with more than 1-3 sentences or Questions
   });
 });
 
-// Use the PORT from environment (Render assigns this dynamically)
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running on port ${PORT}`);
