@@ -300,7 +300,7 @@
     </div>
     
     <div class="info-box">
-      💡 <strong>Note:</strong> Your conversations will be saved securely with your username.
+      ðŸ’¡ <strong>Note:</strong> Your conversations will be saved securely with your username.
     </div>
   </div>
 
@@ -334,87 +334,82 @@
       clearMessages();
     });
 
-    // Login form submission
-    loginFormElement.addEventListener('submit', (e) => {
+    // Login form submission (Server-side with Supabase)
+    loginFormElement.addEventListener('submit', async (e) => {
       e.preventDefault();
+      clearMessages();
       
       const username = document.getElementById('loginUsername').value.trim();
       const password = document.getElementById('loginPassword').value;
 
-      // Basic validation
-      if (username.length < 2) {
-        showError('Username must be at least 2 characters long');
-        return;
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Login failed');
+        }
+
+        // On success: store username in sessionStorage and redirect
+        const sanitizedUsername = result.username.replace(/[^a-zA-Z0-9_-]/g, '_');
+        sessionStorage.setItem('username', sanitizedUsername);
+        sessionStorage.setItem('loginTime', new Date().toISOString());
+        window.location.href = 'index.html';
+
+      } catch (err) {
+        showError(err.message);
       }
-
-      // Check if user exists
-      if (!users[username]) {
-        showError('Username not found. Please sign up first.');
-        return;
-      }
-
-      // Check password
-      if (users[username] !== password) {
-        showError('Incorrect password. Please try again.');
-        return;
-      }
-
-      // Sanitize username
-      const sanitizedUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-      // Store username in sessionStorage
-      sessionStorage.setItem('username', sanitizedUsername);
-      sessionStorage.setItem('loginTime', new Date().toISOString());
-
-      // Redirect to main app
-      window.location.href = 'index.html';
     });
 
-    // Signup form submission
-    signupFormElement.addEventListener('submit', (e) => {
+    // Signup form submission (Server-side with Supabase)
+    signupFormElement.addEventListener('submit', async (e) => {
       e.preventDefault();
+      clearMessages();
       
       const username = document.getElementById('signupUsername').value.trim();
       const password = document.getElementById('signupPassword').value;
       const passwordConfirm = document.getElementById('signupPasswordConfirm').value;
 
-      // Basic validation
-      if (username.length < 2) {
-        showError('Username must be at least 2 characters long');
-        return;
-      }
-
-      if (password.length < 4) {
-        showError('Password must be at least 4 characters long');
-        return;
-      }
-
+      // Client-side validation
       if (password !== passwordConfirm) {
         showError('Passwords do not match');
         return;
       }
 
-      // Check if username already exists
-      if (users[username]) {
-        showError('Username already exists. Please choose a different one.');
-        return;
+      try {
+        const response = await fetch('/api/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Signup failed');
+        }
+
+        showSuccess('Account created successfully! Signing you in...');
+
+        // Auto-login after 1.5 seconds
+        setTimeout(() => {
+          const sanitizedUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+          sessionStorage.setItem('username', sanitizedUsername);
+          sessionStorage.setItem('loginTime', new Date().toISOString());
+          window.location.href = 'index.html';
+        }, 1500);
+
+      } catch (err) {
+        showError(err.message);
       }
-
-      // Save user
-      users[username] = password;
-      localStorage.setItem('voiceAssistantUsers', JSON.stringify(users));
-
-      // Show success message
-      showSuccess('Account created successfully! Signing you in...');
-
-      // Auto-login after 1.5 seconds
-      setTimeout(() => {
-        const sanitizedUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
-        sessionStorage.setItem('username', sanitizedUsername);
-        sessionStorage.setItem('loginTime', new Date().toISOString());
-        window.location.href = 'index.html';
-      }, 1500);
     });
+
+    
 
     function showError(message) {
       errorMessage.textContent = message;
