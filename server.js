@@ -12,13 +12,13 @@ let config = {
   SUPABASE_KEY: process.env.SUPABASE_KEY
 };
 
-// ONLY use config.json if environment variables are not set AND file exists
-if (!config.OPENAI_KEY && fs.existsSync('./config.json')) {
+// If config.json exists (development), use it
+if (fs.existsSync('./config.json')) {
   const fileConfig = JSON.parse(fs.readFileSync('./config.json'));
   config = { ...config, ...fileConfig };
   console.log('📋 Using config.json (development mode)');
-} else if (config.OPENAI_KEY) {
-  console.log('🌐 Using environment variables (production mode)');
+} else {
+  console.log('🌍 Using environment variables (production mode)');
 }
 
 // Validate that we have the required config
@@ -37,6 +37,60 @@ const wss = new WebSocketServer({ server });
 const clientPath = fs.existsSync('../client') ? '../client' : './client';
 app.use(express.static(clientPath));
 console.log(`📁 Serving static files from: ${clientPath}`);
+
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// --- AUTH API ROUTES ---
+
+// Sign Up Route
+app.post('/api/signup', async (req, res) => {
+  const { username, password } = req.body;
+  
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .insert([{ username, password }])
+      .select();
+
+    if (error) {
+      // Check for unique constraint violation (username exists)
+      if (error.code === '23505') {
+        return res.status(400).json({ error: 'Username already exists' });
+      }
+      throw error;
+    }
+
+    res.json({ success: true, message: 'User created' });
+  } catch (err) {
+    console.error('Signup Error:', err.message);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// Login Route
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .eq('password', password)
+      .single();
+
+    if (error || !data) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    res.json({ success: true, username: data.username });
+  } catch (err) {
+    console.error('Login Error:', err.message);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
 
 // Supabase Connection
 const supabaseUrl = config.SUPABASE_URL;
@@ -271,30 +325,55 @@ wss.on('connection', async (clientWs) => {
             modalities: ['text', 'audio'],
             instructions: `Act as a facilitator to help the user write a self-reflection. The user recently wrote a term paper. Your task is to facilitate the user writing the self-reflection via multi-turn dialogue
 You will ask open-ended questions that should align with the six stages of Gibbs’ Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs’ Reflective Cycle throughout the session.
-At the start of each phase, ask one of the following questions in order:
+.At the start of each phase, ask one of the following questions in order:
 1. Can you describe the process of writing your term paper, from planning to completion?
 2. How did you feel while working on the term paper, especially during challenging moments?
 3. What aspects of your term paper do you think went well, and what didn’t work as effectively?
 4. Why do you think certain parts of the process were successful or unsuccessful? Were there any factors or strategies that contributed to the outcome?
 5. What have you learned from writing this term paper, both about the subject and your own writing process?
 6. What will you do differently in your next term paper to improve your approach and results?
-Ask one main question per turn. Use specific, process-focused follow-up questions if the response is brief or lacks detail. Ask specific questions rather than generic questions. Do not move to the next question unless the user provides sufficient detail or explicitly refuses to elaborate. If the user refuses, acknowledge briefly and continue without pressure.
+Prefer one question per turn afterward to keep the reflection focused and maintain natural pacing
+- After asking the phase-start question, continue the dialogue with process-focused follow-ups to prompt elaboration. 
+- Only move to the next phase if the user provides sufficient detail or explicitly refuses. 
+- Do not mention the phase name or Gibbs’ model in any output.
+Do not progress to the next phase until the user provides a minimally sufficient descriptive answer for the current phase.
+ If the user gives a one-line answer, or an answer containing only a single idea or detail, you must ask at least one clarifying or elaborative question before moving forward.
+Only move to the next phase if:
+the user has provided enough detail for that phase, or
+
+
+the user clearly indicates unwillingness to elaborate (e.g., “skip”, “continue”, “I don’t know”, “no more details”).
+
+
+If the user is unwilling, acknowledge briefly and move to the next phase without pressure.
+ If they are willing but brief, nudge gently with a specific follow-up question.
+
+
+
+Your behavior must always:
+stay in the phase if detail is insufficient and the user is willing,
+
+
+move on only when detail is sufficient or the user refuses.
+Ask specific questions rather than generic questions.
 Use Guiding Questions to facilitate the self-reflection.  
-Provide process-level micro-feedback provided by the user. The feedback should focus on the level of reflection rather than the content of the experience. Encourage, supervise, and incorporate social and personal values. You are not suppose to do reflection yourself but rather it is responsibility of the user as she/he is engaged in self-reflection. Use Scaffolded Follow-up questions can also be employed to explore deeper when needed. 
+Provide process-level micro-feedback provided by the user. The feedback should focus on the level of reflection rather than the content of the experience. Encourage, supervise, and incorporate social and personal values. You are not suppose to do reflection yourself but rather it is responsibility of the user as she/he is engaged in self-reflection
+Use Scaffolded Follow-up questions can also be employed to explore deeper when needed. 
 Request specific examples from the user. If the student mentions a shift in views, prompt him for examples from his experience that illustrate this change.
-Do not perform the reflection for the user. Do not summarize or provide feedback unless asked. Do Not Respond with more than 1-3 sentences or Questions. Always response in English Language
+After completing the Action Plan stage, implicitly indicate that the reflection is complete. Then ask the user if they would like any of the following such as a summary of their reflection, feedback on the level of reflection or any other remarks or suggestions. Be very concise and precise. Do not mention the Gibbs stages explicitly
+
+
+Do Not Respond with more than 1-3 sentences or Questions
 `,
             voice: 'alloy',
             input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
             input_audio_transcription: { model: 'whisper-1' },
-            // FIXED: Very patient turn detection for reflective conversations
-            // Allows participants to think/pause without interruption
             turn_detection: { 
               type: 'server_vad', 
-              threshold: 0.5,           // Voice activity threshold (0.0-1.0)
-              prefix_padding_ms: 400,   // Audio before speech starts
-              silence_duration_ms: 3000 // 3 seconds - very patient, allows thinking time
+              threshold: 0.5, 
+              prefix_padding_ms: 300, 
+              silence_duration_ms: 600
             },
             temperature: 1.0,
             max_response_output_tokens: 'inf'
@@ -314,7 +393,7 @@ Do not perform the reflection for the user. Do not summarize or provide feedback
                 content: [
                   {
                     type: 'input_text',
-                    text: 'Say in English: "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?"'
+                    text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?'
                   }
                 ]
               }
@@ -341,7 +420,7 @@ Do not perform the reflection for the user. Do not summarize or provide feedback
                 content: [
                   {
                     type: 'input_text',
-                    text: 'Say "Welcome back! Ready to continue?" in a friendly tone in English.'
+                    text: 'Say "Welcome back! Ready to continue?" in a friendly tone.'
                   }
                 ]
               }
@@ -636,13 +715,19 @@ Do not perform the reflection for the user. Do not summarize or provide feedback
   });
 });
 
-// Use the PORT from environment (Render assigns this dynamically)
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 Environment: ${process.env.PORT ? 'Production (Render)' : 'Development (Local)'}`);
-  if (!process.env.PORT) {
-    console.log(`Local: http://localhost:${PORT}`);
+server.listen(config.PORT || process.env.PORT || 3000, '0.0.0.0', () => {
+  const port = config.PORT || process.env.PORT || 3000;
+  console.log(`Server running on port ${port}`);
+  console.log(`Local: http://localhost:${port}`);
+  if (process.env.PORT) {
+    console.log('🌐 Running in production mode');
+  } else {
+    console.log(`Local network access: http://[YOUR_IP]:${port}`);
   }
-  console.log('💾 Conversations will be saved to Supabase');
+  console.log('Make sure your OpenAI API key is configured');
+  console.log(`💾 Conversations will be saved to Supabase`);
+  console.log('\n📱 To access from mobile:');
+  console.log('1. Find your computer\'s IP address (ipconfig on Windows, ifconfig on Mac/Linux)');
+  console.log(`2. On your phone, open: http://[YOUR_IP]:${port}`);
+  console.log('3. Make sure your phone and computer are on the same WiFi network\n');
 });
