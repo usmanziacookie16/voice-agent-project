@@ -1,0 +1,489 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #60a5fa 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+}
+
+.voice-agent-container {
+  background: white;
+  border-radius: 0;
+  box-shadow: none;
+  max-width: 100%;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.agent-header {
+  background: #1e293b;
+  padding: 20px 30px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: white;
+  border-bottom: 1px solid #334155;
+}
+
+.agent-avatar {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.avatar-circle {
+  width: 50px;
+  height: 50px;
+  background: #334155;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #475569;
+}
+
+.microphone-icon {
+  width: 24px;
+  height: 24px;
+  color: white;
+}
+
+.agent-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-name {
+  font-size: 1.4em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.agent-status {
+  font-size: 0.85em;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.agent-status.listening {
+  animation: pulse-text 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 1; }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #334155;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9em;
+  font-weight: 500;
+  border: 1px solid #475569;
+}
+
+.user-icon {
+  font-size: 1.1em;
+}
+
+.btn-logout {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.85em;
+  font-weight: 600;
+  border: 2px solid #475569;
+  background: #334155;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: inherit;
+}
+
+.btn-logout:hover {
+  background: #475569;
+  border-color: #64748b;
+  transform: translateY(-1px);
+}
+
+/* Browser Warning */
+.browser-warning {
+  background: #fef3c7;
+  border-bottom: 2px solid #f59e0b;
+  padding: 15px 30px;
+  color: #92400e;
+}
+
+.browser-warning strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 1em;
+}
+
+.browser-warning p {
+  margin: 5px 0;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+/* Voice Interface */
+.voice-interface {
+  padding: 40px 30px 30px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  flex: 1;
+  overflow: hidden;
+  align-items: center;
+}
+
+/* Speech Container */
+.speech-container {
+  flex: 1;
+  width: 100%;
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.current-speech {
+  width: 100%;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.welcome-message {
+  text-align: center;
+  padding: 40px 20px;
+  color: #64748b;
+  animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-icon {
+  font-size: 4em;
+  margin-bottom: 20px;
+}
+
+.welcome-message h2 {
+  font-size: 1.8em;
+  color: #1e293b;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.welcome-message p {
+  font-size: 1.1em;
+  color: #64748b;
+}
+
+/* AI Speech Bubble */
+.speech-bubble {
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+  color: black;
+  padding: 30px 40px;
+  border-radius: 30px;
+  max-width: 100%;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.3);
+  animation: bubbleIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  font-size: 1.3em;
+  line-height: 1.6;
+  text-align: center;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes bubbleIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.8) translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.speech-bubble.interrupted {
+  background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+  box-shadow: 0 8px 24px rgba(71, 85, 105, 0.3);
+}
+
+.speech-text {
+  display: inline;
+  word-wrap: break-word;
+}
+
+.speech-text.typing::after {
+  content: '▋';
+  animation: blink 1s step-end infinite;
+  margin-left: 4px;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Single Circular Toggle Button - Bottom Center */
+.toggle-button-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  height: 140px;
+  width: 140px;
+}
+
+.pulse-ring {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border: 3px solid #3b82f6;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-mic-button.active ~ .pulse-ring {
+  border-color: #ef4444;
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.pulse-delay-1 {
+  animation-delay: 0.4s !important;
+}
+
+.pulse-delay-2 {
+  animation-delay: 0.8s !important;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.toggle-mic-button {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(148, 163, 184, 0.4);
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 10;
+  position: relative;
+}
+
+.toggle-mic-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.5);
+}
+.toggle-mic-button:active {
+  transform: scale(0.95);
+}
+
+.toggle-mic-button.active {
+  /* Changed from blue to Red Gradient */
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  box-shadow: 0 12px 32px rgba(239, 68, 68, 0.6);
+  animation: pulse-button 1.5s ease-in-out infinite;
+ 
+}
+@keyframes pulse-button {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 12px 32px rgba(239, 68, 68, 0.6);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 12px 40px rgba(239, 68, 68, 0.8);
+  }
+}
+
+.mic-icon,
+.stop-icon {
+  width: 40px;
+  height: 40px;
+  stroke: white;
+  fill: none;
+  stroke-width: 2.5;
+  transition: all 0.3s ease;
+}
+
+.stop-icon {
+  fill: white;
+  stroke: none;
+}
+
+.toggle-mic-button .mic-icon {
+  display: block;
+}
+
+.toggle-mic-button .stop-icon {
+  display: none;
+}
+
+.toggle-mic-button.active .mic-icon {
+  display: none;
+}
+
+.toggle-mic-button.active .stop-icon {
+  display: block;
+}
+
+/* Footer */
+.agent-footer {
+  background: #f8f9fa;
+  padding: 14px 30px;
+  border-top: 2px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.footer-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.info-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 0.85em;
+  background: white;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.info-badge svg {
+  color: #2563eb;
+  flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  body {
+    padding: 0;
+  }
+
+  .voice-agent-container {
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .agent-header {
+    flex-direction: column;
+    gap: 15px;
+    padding: 20px;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .voice-interface {
+    padding: 30px 20px 20px 20px;
+  }
+
+  .toggle-button-container {
+    height: 120px;
+    width: 120px;
+  }
+
+  .toggle-mic-button {
+    width: 85px;
+    height: 85px;
+	background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+  }
+
+  .mic-icon,
+  .stop-icon {
+    width: 35px;
+    height: 35px;
+  }
+
+  .pulse-ring {
+    width: 120px;
+    height: 120px;
+  }
+
+  .speech-bubble {
+    padding: 24px 28px;
+    font-size: 1.1em;
+    border-radius: 24px;
+  }
+
+  .agent-footer {
+    padding: 10px 20px;
+  }
+
+  .info-badge {
+    font-size: 0.8em;
+    padding: 8px 12px;
+  }
+}

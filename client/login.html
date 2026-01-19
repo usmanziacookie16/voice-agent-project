@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conversational Voice Assistant - Sign In</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #60a5fa 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .auth-container {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 450px;
+      width: 100%;
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .logo-icon {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 15px;
+    }
+
+    .logo-icon svg {
+      width: 40px;
+      height: 40px;
+      color: white;
+    }
+
+    h1 {
+      color: #1e3a8a;
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 2em;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #64748b;
+      margin-bottom: 30px;
+      font-size: 0.95em;
+    }
+
+    .tab-container {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 30px;
+      background: #f1f5f9;
+      padding: 5px;
+      border-radius: 12px;
+    }
+
+    .tab-button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      font-size: 0.95em;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-family: inherit;
+    }
+
+    .tab-button.active {
+      background: #2563eb;
+      color: white;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+    }
+
+    .form-container {
+      display: none;
+    }
+
+    .form-container.active {
+      display: block;
+    }
+
+    .error-message {
+      background: #fee2e2;
+      color: #dc2626;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 0.9em;
+      border-left: 4px solid #dc2626;
+      display: none;
+    }
+
+    .error-message.show {
+      display: block;
+    }
+
+    .success-message {
+      background: #d1fae5;
+      color: #059669;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 0.9em;
+      border-left: 4px solid #059669;
+      display: none;
+    }
+
+    .success-message.show {
+      display: block;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      color: #1e293b;
+      font-weight: 600;
+      margin-bottom: 8px;
+      font-size: 0.95em;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 16px;
+      transition: all 0.3s ease;
+      font-family: inherit;
+      color: #1e293b;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+      color: white;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+      font-family: inherit;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .info-box {
+      background: #eff6ff;
+      border-left: 4px solid #2563eb;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 20px;
+      font-size: 0.85em;
+      color: #1e40af;
+    }
+
+    .info-box strong {
+      color: #1e3a8a;
+    }
+  </style>
+</head>
+<body>
+  <div class="auth-container">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </div>
+      <h1>Conversational Voice Assistant</h1>
+      <p class="subtitle">Your AI-powered conversation partner</p>
+    </div>
+
+    <div class="tab-container">
+      <button class="tab-button active" id="loginTab">Sign In</button>
+      <button class="tab-button" id="signupTab">Sign Up</button>
+    </div>
+    
+    <div id="errorMessage" class="error-message"></div>
+    <div id="successMessage" class="success-message"></div>
+    
+    <!-- Login Form -->
+    <div id="loginForm" class="form-container active">
+      <form id="loginFormElement">
+        <div class="form-group">
+          <label for="loginUsername">Username</label>
+          <input 
+            type="text" 
+            id="loginUsername" 
+            name="username" 
+            placeholder="Enter your username" 
+            required
+            autocomplete="username"
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input 
+            type="password" 
+            id="loginPassword" 
+            name="password" 
+            placeholder="Enter your password" 
+            required
+            autocomplete="current-password"
+          >
+        </div>
+        
+        <button type="submit" class="btn-primary">Sign In</button>
+      </form>
+    </div>
+
+    <!-- Signup Form -->
+    <div id="signupForm" class="form-container">
+      <form id="signupFormElement">
+        <div class="form-group">
+          <label for="signupUsername">Username</label>
+          <input 
+            type="text" 
+            id="signupUsername" 
+            name="username" 
+            placeholder="Choose a username" 
+            required
+            autocomplete="username"
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="signupPassword">Password</label>
+          <input 
+            type="password" 
+            id="signupPassword" 
+            name="password" 
+            placeholder="Create a password" 
+            required
+            autocomplete="new-password"
+          >
+        </div>
+
+        <div class="form-group">
+          <label for="signupPasswordConfirm">Confirm Password</label>
+          <input 
+            type="password" 
+            id="signupPasswordConfirm" 
+            name="passwordConfirm" 
+            placeholder="Confirm your password" 
+            required
+            autocomplete="new-password"
+          >
+        </div>
+        
+        <button type="submit" class="btn-primary">Create Account</button>
+      </form>
+    </div>
+    
+    <div class="info-box">
+       <strong>Note:</strong> Your conversations will be saved securely with your username in our system.
+    </div>
+  </div>
+
+  <script>
+    const loginTab = document.getElementById('loginTab');
+    const signupTab = document.getElementById('signupTab');
+    const loginFormContainer = document.getElementById('loginForm');
+    const signupFormContainer = document.getElementById('signupForm');
+    const loginFormElement = document.getElementById('loginFormElement');
+    const signupFormElement = document.getElementById('signupFormElement');
+    const errorMessage = document.getElementById('errorMessage');
+    const successMessage = document.getElementById('successMessage');
+
+    // Simple in-memory user storage (for demo - in production use a real database)
+    const users = JSON.parse(localStorage.getItem('voiceAssistantUsers') || '{}');
+
+    // Tab switching
+    loginTab.addEventListener('click', () => {
+      loginTab.classList.add('active');
+      signupTab.classList.remove('active');
+      loginFormContainer.classList.add('active');
+      signupFormContainer.classList.remove('active');
+      clearMessages();
+    });
+
+    signupTab.addEventListener('click', () => {
+      signupTab.classList.add('active');
+      loginTab.classList.remove('active');
+      signupFormContainer.classList.add('active');
+      loginFormContainer.classList.remove('active');
+      clearMessages();
+    });
+
+    // Login form submission (Server-side with Supabase)
+    loginFormElement.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearMessages();
+      
+      const username = document.getElementById('loginUsername').value.trim();
+      const password = document.getElementById('loginPassword').value;
+
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Login failed');
+        }
+
+        // On success: store username in sessionStorage and redirect
+        const sanitizedUsername = result.username.replace(/[^a-zA-Z0-9_-]/g, '_');
+        sessionStorage.setItem('username', sanitizedUsername);
+        sessionStorage.setItem('loginTime', new Date().toISOString());
+        window.location.href = 'index.html';
+
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    // Signup form submission (Server-side with Supabase)
+    signupFormElement.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearMessages();
+      
+      const username = document.getElementById('signupUsername').value.trim();
+      const password = document.getElementById('signupPassword').value;
+      const passwordConfirm = document.getElementById('signupPasswordConfirm').value;
+
+      // Client-side validation
+      if (password !== passwordConfirm) {
+        showError('Passwords do not match');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Signup failed');
+        }
+
+        showSuccess('Account created successfully! Signing you in...');
+
+        // Auto-login after 1.5 seconds
+        setTimeout(() => {
+          const sanitizedUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+          sessionStorage.setItem('username', sanitizedUsername);
+          sessionStorage.setItem('loginTime', new Date().toISOString());
+          window.location.href = 'index.html';
+        }, 1500);
+
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    
+
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.classList.add('show');
+      successMessage.classList.remove('show');
+      
+      setTimeout(() => {
+        errorMessage.classList.remove('show');
+      }, 4000);
+    }
+
+    function showSuccess(message) {
+      successMessage.textContent = message;
+      successMessage.classList.add('show');
+      errorMessage.classList.remove('show');
+    }
+
+    function clearMessages() {
+      errorMessage.classList.remove('show');
+      successMessage.classList.remove('show');
+    }
+
+    // Check if already logged in
+    if (sessionStorage.getItem('username')) {
+      window.location.href = 'index.html';
+    }
+  </script>
+</body>
+</html>
