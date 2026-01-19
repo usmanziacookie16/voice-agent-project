@@ -294,7 +294,7 @@ wss.on('connection', async (clientWs) => {
       sessionId = msg.sessionId || Date.now();
       conversationId = msg.conversationId || sessionId; // Use provided conversationId
       isReconnection = msg.isReconnection || false;
-      const hasMessages = msg.hasMessages || false; // Check if client has conversation history
+      const hasMessages = msg.hasMessages || false; // Check if client has conversation history (was paused)
       
       console.log(`👤 User: ${username} | Session: ${sessionId} | Conversation: ${conversationId} | Reconnection: ${isReconnection} | Has Messages: ${hasMessages}`);
       
@@ -324,13 +324,13 @@ wss.on('connection', async (clientWs) => {
           session: {
             modalities: ['text', 'audio'],
             instructions: `Act as a facilitator to help the user write a self-reflection. The user recently wrote a term paper. Your task is to facilitate the user writing the self-reflection via multi-turn dialogue
-You will ask open-ended questions that should align with the six stages of Gibbs’ Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs’ Reflective Cycle throughout the session.
+You will ask open-ended questions that should align with the six stages of Gibbs' Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs' Reflective Cycle throughout the session.
 
 
 At the start of each phase, ask one of the following questions in order:
 1. Can you describe the process of writing your term paper, from planning to completion?
 2. How did you feel while working on the term paper, especially during challenging moments?
-3. What aspects of your term paper do you think went well, and what didn’t work as effectively?
+3. What aspects of your term paper do you think went well, and what didn't work as effectively?
 4. Why do you think certain parts of the process were successful or unsuccessful? Were there any factors or strategies that contributed to the outcome?
 5. What have you learned from writing this term paper, both about the subject and your own writing process?
 6. What will you do differently in your next term paper to improve your approach and results?
@@ -359,7 +359,7 @@ Do not perform the reflection for the user. Do Not Respond with more than 1-3 se
 
         // Send initial greeting based on connection type
         if (!isReconnection && !hasMessages) {
-          // First time ever OR new session after stop - initial greeting
+          // First time ever OR new session after complete stop - initial greeting
           setTimeout(() => {
             console.log('🎤 Sending initial greeting (first time or new session)');
             openaiWs.send(JSON.stringify({
@@ -384,11 +384,10 @@ Do not perform the reflection for the user. Do Not Respond with more than 1-3 se
               }
             }));
           }, 500);
-        } else if (hasMessages && !isReconnection) {
-          // This shouldn't happen anymore since we clear persistentConversationId on manual stop
-          // But keeping as fallback
+        } else if (hasMessages) {
+          // User paused and is now resuming - "ready to continue" message
           setTimeout(() => {
-            console.log('👋 Sending welcome back message (fallback)');
+            console.log('👋 Sending welcome back message (resume after pause)');
             openaiWs.send(JSON.stringify({
               type: 'conversation.item.create',
               item: {
@@ -617,7 +616,7 @@ Do not perform the reflection for the user. Do Not Respond with more than 1-3 se
       openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: msg.audio }));
     }
 
-    // Stop message - save and prepare for next session
+    // Stop message - save conversation
     if (msg.type === 'stop') {
       const requestNewSession = msg.requestNewSession || false;
       
@@ -697,7 +696,7 @@ server.listen(config.PORT || process.env.PORT || 3000, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
   console.log(`Local: http://localhost:${port}`);
   if (process.env.PORT) {
-    console.log('🌐 Running in production mode');
+    console.log('🌍 Running in production mode');
   } else {
     console.log(`Local network access: http://[YOUR_IP]:${port}`);
   }
@@ -708,4 +707,3 @@ server.listen(config.PORT || process.env.PORT || 3000, '0.0.0.0', () => {
   console.log(`2. On your phone, open: http://[YOUR_IP]:${port}`);
   console.log('3. Make sure your phone and computer are on the same WiFi network\n');
 });
-
