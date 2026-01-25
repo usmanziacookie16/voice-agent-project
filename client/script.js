@@ -10,15 +10,15 @@ let messageSequence = 0;
 
 // Track if this is the first connection or a reconnection
 let isFirstConnection = true;
-let currentSessionId = null; // Track current session to avoid duplicates
-let persistentConversationId = null; // Persistent conversation ID across manual pauses
-let hasHadFirstGreeting = false; // Track if we've ever had the initial greeting
-let wasPausedManually = false; // Track if user manually paused (for "ready to continue" message)
+let currentSessionId = null;
+let persistentConversationId = null;
+let hasHadFirstGreeting = false;
+let wasPausedManually = false;
 
 // Connection management
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAY = 3000; // 3 seconds
+const RECONNECT_DELAY = 3000;
 let heartbeatInterval = null;
 let lastHeartbeat = Date.now();
 let connectionTimeout = null;
@@ -62,7 +62,6 @@ function updateUI(listening) {
     agentStatus.classList.add('listening');
   } else {
     toggleButton.classList.remove('active');
-    // Change "Ready to listen" to "Paused" or keep it as "Ready"
     agentStatus.textContent = wasPausedManually ? 'Paused' : 'Ready to listen';
     agentStatus.classList.remove('listening');
   }
@@ -71,10 +70,8 @@ function updateUI(listening) {
 // Toggle button click handler
 toggleButton.addEventListener('click', () => {
   if (isRecording) {
-    // Currently recording, so pause
     stopRecording();
   } else {
-    // Not recording, so start
     startRecording();
   }
 });
@@ -110,7 +107,7 @@ async function startRecording() {
     if (ws.readyState !== WebSocket.OPEN) {
       console.error('❌ Connection timeout');
       ws.close();
-      showErrorBubble('Connection timeout. Please check your internet and try again.');
+      showStatusError('Connection timeout. Please check your internet and try again.');
       cleanup(false);
     }
   }, 10000);
@@ -124,7 +121,7 @@ async function startRecording() {
     startHeartbeat();
     
     // Remove any error messages
-    removeErrorBubble();
+    removeStatusError();
     
     // Generate or reuse session ID
     if (!currentSessionId) {
@@ -185,7 +182,6 @@ async function startRecording() {
       }
 
       // IMPORTANT: Use device sample rate to avoid Firefox issues
-      // Create audioContext without specifying sample rate - let browser choose
       audioContext = new AudioContextClass();
       const actualSampleRate = audioContext.sampleRate;
       console.log(`Using sample rate: ${actualSampleRate}Hz`);
@@ -196,7 +192,6 @@ async function startRecording() {
       }
 
       // Initialize TTS audio context with SAME sample rate as microphone context
-      // This is critical for Firefox compatibility
       if (!ttsAudioContext) {
         ttsAudioContext = new AudioContextClass({ sampleRate: actualSampleRate });
         if (ttsAudioContext.state === 'suspended') {
@@ -207,7 +202,6 @@ async function startRecording() {
       source = audioContext.createMediaStreamSource(stream);
       
       // Use ScriptProcessor for better browser compatibility
-      // Safari and Firefox work better with 4096 buffer
       processor = audioContext.createScriptProcessor(4096, 1, 1);
       source.connect(processor);
       processor.connect(audioContext.destination);
@@ -260,7 +254,7 @@ async function startRecording() {
     lastHeartbeat = Date.now();
     
     // Remove any error messages on successful message
-    removeErrorBubble();
+    removeStatusError();
     
     // Debug logging (except audio deltas)
     if (msg.type !== 'assistant_audio_delta') {
@@ -358,13 +352,13 @@ async function startRecording() {
 
     // Error handling
     if (msg.type === 'error') {
-      showErrorBubble(msg.message);
+      showStatusError(msg.message);
     }
   };
 
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
-    showErrorBubble('Connection error. Retrying...');
+    showStatusError('Connection error. Retrying...');
     
     // CRITICAL: Request emergency save from server
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -385,7 +379,7 @@ async function startRecording() {
       if (event.code !== 1000 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
         console.log(`🔄 Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
-        showErrorBubble(`Connection lost. Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+        showStatusError(`Connection lost. Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
         
         setTimeout(() => {
           if (isRecording) {
@@ -395,7 +389,7 @@ async function startRecording() {
       } else {
         cleanup(false); // Connection lost, not manual pause
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-          showErrorBubble('Connection lost after multiple attempts. Please try again.');
+          showStatusError('Connection lost after multiple attempts. Please try again.');
         }
       }
     }
@@ -470,7 +464,6 @@ function cleanup(isManualPause = false) {
   // If connection lost, also keep state for reconnection
   if (isManualPause) {
     console.log('⏸️ Manual pause - ready to resume conversation');
-    // Don't reset session or conversation ID - we want to continue
   } else {
     console.log('🔌 Connection lost - session preserved for reconnection');
   }
@@ -484,7 +477,7 @@ function startHeartbeat() {
       const timeSinceLastMessage = Date.now() - lastHeartbeat;
       if (timeSinceLastMessage > 30000) { // 30 seconds without any message
         console.warn('⚠️ No server response for 30 seconds');
-        showErrorBubble('Connection may be unstable...');
+        showStatusError('Connection may be unstable...');
       }
     }
   }, 5000); // Check every 5 seconds
@@ -497,22 +490,23 @@ function stopHeartbeat() {
   }
 }
 
-// Show error as a bubble
-function showErrorBubble(message) {
-  // Remove any existing errors first
-  removeErrorBubble();
-  
-  const errorBubble = document.createElement('div');
-  errorBubble.classList.add('speech-bubble', 'interrupted', 'error-bubble');
-  errorBubble.innerHTML = `<span class="speech-text">⚠️ ${escapeHtml(message)}</span>`;
-  currentSpeechDiv.innerHTML = '';
-  currentSpeechDiv.appendChild(errorBubble);
+// Show error in status bar at bottom (NOT in speech bubble)
+function showStatusError(message) {
+  // Update the agent status at the top
+  agentStatus.textContent = `⚠️ ${message}`;
+  agentStatus.classList.add('error');
+  agentStatus.classList.remove('listening');
 }
 
-// Remove error bubbles
-function removeErrorBubble() {
-  const errorBubbles = currentSpeechDiv.querySelectorAll('.error-bubble');
-  errorBubbles.forEach(bubble => bubble.remove());
+// Remove error from status
+function removeStatusError() {
+  agentStatus.classList.remove('error');
+  if (isRecording) {
+    agentStatus.textContent = 'Listening...';
+    agentStatus.classList.add('listening');
+  } else {
+    agentStatus.textContent = wasPausedManually ? 'Paused' : 'Ready to listen';
+  }
 }
 
 // Stop audio playback immediately (for interruptions)
