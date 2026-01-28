@@ -226,18 +226,61 @@ function saveFallbackLocal(username, conversationId, conversationData) {
     const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
     
     if (fs.existsSync(filename)) {
-      const existing = JSON.parse(fs.readFileSync(filename));
-      if (existing.total_messages >= conversationData.total_messages) {
-        console.log(`⏭️ Skipped local save (no new messages): ${filename}`);
-        return;
+      const existingData = JSON.parse(fs.readFileSync(filename, 'utf8'));
+      if (conversationData.messages.length > existingData.messages.length) {
+        fs.writeFileSync(filename, JSON.stringify(conversationData, null, 2));
+        console.log(`💾 Conversation updated locally: ${filename} (${conversationData.messages.length} messages)`);
+      }
+    } else {
+      fs.writeFileSync(filename, JSON.stringify(conversationData, null, 2));
+      console.log(`💾 Conversation saved locally: ${filename} (${conversationData.messages.length} messages)`);
+    }
+  } catch (error) {
+    console.error('❌ Error saving locally:', error);
+  }
+}
+
+// NEW: Function to load existing conversation
+async function loadExistingConversation(username, conversationId) {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('messages')
+        .eq('username', username)
+        .eq('conversation_id', conversationId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          console.log('📭 No existing conversation found');
+          return [];
+        }
+        throw error;
+      }
+
+      if (data && data.messages) {
+        console.log(`📥 Loaded ${data.messages.length} previous messages from Supabase`);
+        return data.messages;
+      }
+    } else {
+      // Try to load from local file
+      const conversationsDir = './conversations';
+      const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
+      
+      if (fs.existsSync(filename)) {
+        const fileData = JSON.parse(fs.readFileSync(filename, 'utf8'));
+        if (fileData.messages) {
+          console.log(`📥 Loaded ${fileData.messages.length} previous messages from local file`);
+          return fileData.messages;
+        }
       }
     }
-    
-    fs.writeFileSync(filename, JSON.stringify(conversationData, null, 2));
-    console.log(`💾 Conversation saved locally (fallback): ${filename}`);
-  } catch (localError) {
-    console.error('❌ Local save also failed:', localError);
+  } catch (error) {
+    console.error('❌ Error loading conversation:', error);
   }
+  
+  return [];
 }
 
 wss.on('connection', async (clientWs) => {
@@ -278,6 +321,18 @@ wss.on('connection', async (clientWs) => {
       
       console.log(`👤 User: ${username} | Session: ${sessionId} | Conversation: ${conversationId} | Reconnection: ${isReconnection} | Has Messages: ${hasMessages}`);
       
+      // FIXED: Load previous conversation if resuming
+      if (hasMessages) {
+        console.log('🔄 Loading previous conversation messages...');
+        const previousMessages = await loadExistingConversation(username, conversationId);
+        
+        if (previousMessages && previousMessages.length > 0) {
+          conversationMessages.push(...previousMessages);
+          messageSequence = previousMessages.length;
+          console.log(`✅ Restored ${previousMessages.length} messages from previous session`);
+        }
+      }
+      
       const model = 'gpt-4o-realtime-preview';
       const url = `wss://api.openai.com/v1/realtime?model=${model}`;
       const { default: WebSocket } = await import('ws');
@@ -289,19 +344,19 @@ wss.on('connection', async (clientWs) => {
         }
       });
 
-      openaiWs.on('open', () => {
+      openaiWs.on('open', async () => {
         console.log('✅ Connected to OpenAI Realtime API');
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
             modalities: ['text', 'audio'],
             instructions: `Act as a facilitator to help the user write a self-reflection. The user recently wrote a term paper. Your task is to facilitate the user writing the self-reflection via multi-turn dialogue
-You will ask open-ended questions that should align with the six stages of Gibbs’ Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs’ Reflective Cycle throughout the session.
+You will ask open-ended questions that should align with the six stages of Gibbs' Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs' Reflective Cycle throughout the session.
  
 At the start of each phase, ask one of the following questions in this order and exactly as they are written below:
 1. Can you describe the process of writing your term paper, from planning to completion?
 2. How did you feel while working on the term paper, especially during challenging moments?
-3. What aspects of your term paper do you think went well, and what didn’t work as effectively?
+3. What aspects of your term paper do you think went well, and what didn't work as effectively?
 4. Why do you think certain parts of the process were successful or unsuccessful? Were there any factors or strategies that contributed to the outcome?
 5. What have you learned from writing this term paper, both about the subject and your own writing process?
 6. What will you do differently in your next term paper to improve your approach and results?
@@ -326,8 +381,37 @@ Do not perform the reflection for the user. Do Not Respond with more than 1-3 se
           }
         }));
 
-        // FIXED: Only send greeting on FIRST connection, not on resume
-        if (!isReconnection && !hasMessages) {
+        // FIXED: Restore conversation context when resuming
+        if (hasMessages && conversationMessages.length > 0) {
+          console.log('🔄 Restoring conversation context to OpenAI...');
+          
+          // Send all previous messages to OpenAI to restore context
+          for (const prevMsg of conversationMessages) {
+            if (prevMsg.role === 'user' || prevMsg.role === 'assistant') {
+              openaiWs.send(JSON.stringify({
+                type: 'conversation.item.create',
+                item: {
+                  type: 'message',
+                  role: prevMsg.role,
+                  content: [
+                    {
+                      type: 'input_text',
+                      text: prevMsg.content
+                    }
+                  ]
+                }
+              }));
+            }
+          }
+          
+          console.log(`✅ Conversation context restored (${conversationMessages.length} messages)`);
+          
+          // Send a signal to the client that we're ready to continue
+          clientWs.send(JSON.stringify({ 
+            type: 'conversation_restored', 
+            messageCount: conversationMessages.length 
+          }));
+        } else if (!isReconnection && !hasMessages) {
           // First time ever - initial greeting
           setTimeout(() => {
             console.log('🎤 Sending initial greeting (first time)');
