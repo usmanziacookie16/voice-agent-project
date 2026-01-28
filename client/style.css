@@ -273,7 +273,7 @@ body {
 }
 
 .speech-text.typing::after {
-  content: '▋';
+  content: 'â–‹';
   animation: blink 1s step-end infinite;
   margin-left: 4px;
 }
