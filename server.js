@@ -101,6 +101,9 @@ const RETRY_DELAY = 2000;
 // Track active sessions to prevent duplicates
 const activeSessions = new Map();
 
+// Store conversation history in memory for quick resume
+const conversationHistory = new Map();
+
 // Helper function to retry operations
 async function retryOperation(operation, retries = MAX_RETRIES) {
   for (let i = 0; i < retries; i++) {
@@ -120,6 +123,49 @@ try {
 } catch (error) {
   console.error('❌ Supabase connection error:', error);
   console.log('⚠️ Will fall back to local file storage');
+}
+
+// Function to load existing conversation
+async function loadConversation(username, conversationId) {
+  console.log(`🔍 Loading conversation: ${username}_C_${conversationId}`);
+  
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('messages')
+        .eq('username', username)
+        .eq('conversation_id', conversationId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          console.log('📭 No existing conversation found');
+          return null;
+        }
+        throw error;
+      }
+
+      if (data && data.messages) {
+        console.log(`✅ Loaded ${data.messages.length} messages from Supabase`);
+        return data.messages;
+      }
+    } else {
+      // Try local file
+      const conversationsDir = './conversations';
+      const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
+      
+      if (fs.existsSync(filename)) {
+        const data = JSON.parse(fs.readFileSync(filename));
+        console.log(`✅ Loaded ${data.messages.length} messages from local file`);
+        return data.messages;
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error loading conversation:', error);
+  }
+  
+  return null;
 }
 
 // Function to save conversation to Supabase with deduplication
@@ -153,6 +199,10 @@ async function saveConversation(username, conversationId, messages, sessionId = 
       lastSaveTime: Date.now()
     });
   }
+  
+  // Store in memory for quick resume
+  const historyKey = `${username}_${conversationId}`;
+  conversationHistory.set(historyKey, [...messages]);
   
   const conversationData = {
     username: username,
@@ -226,117 +276,73 @@ function saveFallbackLocal(username, conversationId, conversationData) {
     const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
     
     if (fs.existsSync(filename)) {
-      const existingData = JSON.parse(fs.readFileSync(filename, 'utf8'));
-      if (conversationData.messages.length > existingData.messages.length) {
-        fs.writeFileSync(filename, JSON.stringify(conversationData, null, 2));
-        console.log(`💾 Conversation updated locally: ${filename} (${conversationData.messages.length} messages)`);
+      const existing = JSON.parse(fs.readFileSync(filename));
+      if (existing.total_messages >= conversationData.total_messages) {
+        console.log(`⏭️ Skipped local save (no new messages): ${filename}`);
+        return;
       }
-    } else {
-      fs.writeFileSync(filename, JSON.stringify(conversationData, null, 2));
-      console.log(`💾 Conversation saved locally: ${filename} (${conversationData.messages.length} messages)`);
     }
+    
+    fs.writeFileSync(filename, JSON.stringify(conversationData, null, 2));
+    console.log(`💾 Conversation saved locally: ${filename} (${conversationData.total_messages} messages)`);
   } catch (error) {
-    console.error('❌ Error saving locally:', error);
+    console.error('❌ Error saving conversation to local file:', error);
   }
 }
 
-// NEW: Function to load existing conversation
-async function loadExistingConversation(username, conversationId) {
-  try {
-    if (supabase) {
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('messages')
-        .eq('username', username)
-        .eq('conversation_id', conversationId)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          console.log('📭 No existing conversation found');
-          return [];
-        }
-        throw error;
-      }
-
-      if (data && data.messages) {
-        console.log(`📥 Loaded ${data.messages.length} previous messages from Supabase`);
-        return data.messages;
-      }
-    } else {
-      // Try to load from local file
-      const conversationsDir = './conversations';
-      const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
-      
-      if (fs.existsSync(filename)) {
-        const fileData = JSON.parse(fs.readFileSync(filename, 'utf8'));
-        if (fileData.messages) {
-          console.log(`📥 Loaded ${fileData.messages.length} previous messages from local file`);
-          return fileData.messages;
-        }
-      }
-    }
-  } catch (error) {
-    console.error('❌ Error loading conversation:', error);
-  }
-  
-  return [];
-}
-
-wss.on('connection', async (clientWs) => {
+wss.on('connection', (clientWs) => {
   console.log('Client connected');
   
-  // Conversation tracking
-  let username = null;
-  let conversationId = null;
-  let sessionId = null;
-  const conversationMessages = [];
+  let openaiWs;
+  let conversationMessages = [];
   let messageSequence = 0;
-  
-  let openaiWs = null;
+  let username = null;
+  let sessionId = null;
+  let conversationId = null;
+  let autoSaveInterval = null;
   let activeResponse = false;
   let currentResponseId = null;
   let currentAssistantMessage = { role: 'assistant', content: '', timestamp: null, interrupted: false };
-  let isReconnection = false;
-  
-  // Auto-save interval
-  let lastSavedMessageCount = 0;
-  const autoSaveInterval = setInterval(() => {
-    if (conversationMessages.length > lastSavedMessageCount && username && conversationId) {
-      console.log('⏰ Auto-save triggered (10s interval)');
-      saveConversation(username, conversationId, conversationMessages, sessionId, false);
-      lastSavedMessageCount = conversationMessages.length;
-    }
-  }, 10000);
 
-  clientWs.on('message', async (message) => {
-    const msg = JSON.parse(message);
+  clientWs.on('message', async (data) => {
+    const msg = JSON.parse(data);
 
     if (msg.type === 'start') {
-      username = msg.username || 'anonymous';
-      sessionId = msg.sessionId || Date.now();
-      conversationId = msg.conversationId || sessionId;
-      isReconnection = msg.isReconnection || false;
+      username = msg.username;
+      sessionId = msg.sessionId;
+      conversationId = msg.conversationId;
+      const isReconnection = msg.isReconnection || false;
       const hasMessages = msg.hasMessages || false;
-      
-      console.log(`👤 User: ${username} | Session: ${sessionId} | Conversation: ${conversationId} | Reconnection: ${isReconnection} | Has Messages: ${hasMessages}`);
-      
-      // FIXED: Load previous conversation if resuming
-      if (hasMessages) {
-        console.log('🔄 Loading previous conversation messages...');
-        const previousMessages = await loadExistingConversation(username, conversationId);
-        
-        if (previousMessages && previousMessages.length > 0) {
-          conversationMessages.push(...previousMessages);
-          messageSequence = previousMessages.length;
-          console.log(`✅ Restored ${previousMessages.length} messages from previous session`);
-        }
-      }
-      
-      const model = 'gpt-4o-realtime-preview';
-      const url = `wss://api.openai.com/v1/realtime?model=${model}`;
-      const { default: WebSocket } = await import('ws');
 
+      console.log(`🎬 Start request - User: ${username}, Session: ${sessionId}, Conversation: ${conversationId}`);
+      console.log(`   Reconnection: ${isReconnection}, Has messages: ${hasMessages}`);
+
+      // Try to load existing conversation from memory first, then from database
+      const historyKey = `${username}_${conversationId}`;
+      let loadedMessages = conversationHistory.get(historyKey);
+      
+      if (!loadedMessages && hasMessages) {
+        loadedMessages = await loadConversation(username, conversationId);
+      }
+
+      if (loadedMessages && loadedMessages.length > 0) {
+        conversationMessages = [...loadedMessages];
+        messageSequence = Math.max(...conversationMessages.map(m => m.sequence || 0)) + 1;
+        console.log(`✅ Resumed conversation with ${conversationMessages.length} messages, next sequence: ${messageSequence}`);
+      } else {
+        conversationMessages = [];
+        messageSequence = 0;
+        console.log(`🆕 Starting new conversation`);
+      }
+
+      // Auto-save every 10 seconds
+      autoSaveInterval = setInterval(() => {
+        if (conversationMessages.length > 0 && username && conversationId) {
+          saveConversation(username, conversationId, conversationMessages, sessionId, false);
+        }
+      }, 10000);
+
+      const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17';
       openaiWs = new WebSocket(url, {
         headers: {
           'Authorization': `Bearer ${config.OPENAI_KEY}`,
@@ -344,108 +350,74 @@ wss.on('connection', async (clientWs) => {
         }
       });
 
-      openaiWs.on('open', async () => {
-        console.log('✅ Connected to OpenAI Realtime API');
-        openaiWs.send(JSON.stringify({
+      openaiWs.on('open', () => {
+        console.log('Connected to OpenAI Realtime API');
+
+        // Build conversation items from history
+        const conversationItems = [];
+        
+        for (const msg of conversationMessages) {
+          if (msg.role === 'user') {
+            conversationItems.push({
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text: msg.content }]
+            });
+          } else if (msg.role === 'assistant' && msg.content.trim() !== '') {
+            conversationItems.push({
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'text', text: msg.content }]
+            });
+          }
+        }
+
+        const sessionConfig = {
           type: 'session.update',
           session: {
             modalities: ['text', 'audio'],
-            instructions: `Act as a facilitator to help the user write a self-reflection. The user recently wrote a term paper. Your task is to facilitate the user writing the self-reflection via multi-turn dialogue
-You will ask open-ended questions that should align with the six stages of Gibbs' Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs' Reflective Cycle throughout the session.
- 
-At the start of each phase, ask one of the following questions in this order and exactly as they are written below:
-1. Can you describe the process of writing your term paper, from planning to completion?
-2. How did you feel while working on the term paper, especially during challenging moments?
-3. What aspects of your term paper do you think went well, and what didn't work as effectively?
-4. Why do you think certain parts of the process were successful or unsuccessful? Were there any factors or strategies that contributed to the outcome?
-5. What have you learned from writing this term paper, both about the subject and your own writing process?
-6. What will you do differently in your next term paper to improve your approach and results?
- 
-Ask one main question per turn. When asking these main questions do not add any examples based on previous input. Ask specific questions rather than generic questions.
- 
-Provide feedback on each answer provided by the user. The feedback should focus on the level of reflection rather than the content of the experience. Encourage, supervise, and incorporate social and personal values. Follow-up questions can also be employed to explore deeper when needed.
-Request specific examples from the user. If the student mentions a shift in views, prompt him for examples from his experience that illustrate this change.
-Do not perform the reflection for the user. Do Not Respond with more than 1-3 sentences or questions. Always response in English Language.`,
+            instructions: hasMessages && conversationMessages.length > 0 
+              ? "You are a helpful AI assistant. Continue the conversation naturally based on the history provided. Do not re-introduce yourself or repeat previous greetings."
+              : "You are a helpful and friendly AI voice assistant. Greet the user warmly and ask how you can help them today.",
             voice: 'alloy',
             input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
             input_audio_transcription: { model: 'whisper-1' },
-            turn_detection: { 
+            turn_detection: {
               type: 'server_vad',
-              threshold: 0.6,  // Increased from 0.5 to reduce false interruptions
-              prefix_padding_ms: 300,  // Increased from 300ms
-              silence_duration_ms: 1500 // Increased from 600ms to wait longer before detecting silence
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500
             },
-            temperature: 1.0,
-            max_response_output_tokens: 'inf'
+            temperature: 0.8,
+            max_response_output_tokens: 4096
           }
-        }));
+        };
 
-        // FIXED: Restore conversation context when resuming
-        if (hasMessages && conversationMessages.length > 0) {
-          console.log('🔄 Restoring conversation context to OpenAI...');
+        openaiWs.send(JSON.stringify(sessionConfig));
+        console.log('✅ Session configured with OpenAI');
+
+        // If we have conversation history, send it to maintain context
+        if (conversationItems.length > 0) {
+          console.log(`📜 Sending ${conversationItems.length} conversation items to OpenAI for context`);
           
-          // Send all previous messages to OpenAI to restore context
-          for (const prevMsg of conversationMessages) {
-            if (prevMsg.role === 'user' || prevMsg.role === 'assistant') {
-              openaiWs.send(JSON.stringify({
-                type: 'conversation.item.create',
-                item: {
-                  type: 'message',
-                  role: prevMsg.role,
-                  content: [
-                    {
-                      type: 'input_text',
-                      text: prevMsg.content
-                    }
-                  ]
-                }
-              }));
-            }
-          }
-          
-          console.log(`✅ Conversation context restored (${conversationMessages.length} messages)`);
-          
-          // Send a signal to the client that we're ready to continue
-          clientWs.send(JSON.stringify({ 
-            type: 'conversation_restored', 
-            messageCount: conversationMessages.length 
-          }));
-        } else if (!isReconnection && !hasMessages) {
-          // First time ever - initial greeting
-          setTimeout(() => {
-            console.log('🎤 Sending initial greeting (first time)');
+          for (const item of conversationItems) {
             openaiWs.send(JSON.stringify({
               type: 'conversation.item.create',
-              item: {
-                type: 'message',
-                role: 'user',
-                content: [
-                  {
-                    type: 'input_text',
-                    text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?"'
-                  }
-                ]
-              }
+              item: item
             }));
-            
-            openaiWs.send(JSON.stringify({
-              type: 'response.create',
-              response: {
-                modalities: ['text', 'audio']
-              }
-            }));
-          }, 500);
-        } else {
-          // Resume after pause - NO GREETING, just silent ready state
-          console.log('🔄 Resuming conversation - no greeting needed');
+          }
+          
+          console.log('✅ Conversation history sent to OpenAI');
         }
       });
 
-      openaiWs.on('message', (data) => {
-        const event = JSON.parse(data.toString());
-        
-        if (event.type && !event.type.includes('audio.delta') && !event.type.includes('input_audio_buffer.append')) {
+      openaiWs.on('message', (message) => {
+        const event = JSON.parse(message);
+
+        if (event.type !== 'response.audio.delta' && 
+            event.type !== 'input_audio_buffer.speech_started' &&
+            event.type !== 'input_audio_buffer.speech_stopped') {
           console.log('Event:', event.type);
         }
 
@@ -608,21 +580,12 @@ Do not perform the reflection for the user. Do Not Respond with more than 1-3 se
     }
 
     if (msg.type === 'stop') {
-      const requestNewSession = msg.requestNewSession || false;
-      
-      console.log(`🛑 Stop received (New session requested: ${requestNewSession})`);
+      console.log(`🛑 Stop received - preserving conversation state`);
       
       if (conversationMessages.length > 0 && username && conversationId) {
         console.log(`💾 Saving conversation before stop: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
         await saveConversation(username, conversationId, conversationMessages, sessionId, true);
-        console.log(`✅ Conversation saved successfully`);
-      } else {
-        console.log('⚠️ No messages to save on stop');
-      }
-      
-      if (requestNewSession && sessionId) {
-        activeSessions.delete(sessionId);
-        console.log(`🆕 Session ${sessionId} removed - next start will create NEW row`);
+        console.log(`✅ Conversation saved - ready to resume`);
       }
       
       if (openaiWs) {
@@ -649,15 +612,6 @@ Do not perform the reflection for the user. Do Not Respond with more than 1-3 se
       console.log(`💾 Final save on disconnect: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
       saveConversation(username, conversationId, conversationMessages, sessionId, true);
       console.log(`📊 Final conversation stats for ${username}: ${conversationMessages.length} messages`);
-    }
-    
-    if (sessionId) {
-      setTimeout(() => {
-        if (activeSessions.has(sessionId)) {
-          activeSessions.delete(sessionId);
-          console.log(`🧹 Session cleaned up after disconnect: ${sessionId}`);
-        }
-      }, 5000);
     }
     
     if (openaiWs) openaiWs.close();
