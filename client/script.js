@@ -8,13 +8,12 @@ let currentSpeechBubble = null;
 let currentSpeechText = '';
 let messageSequence = 0;
 
-// Persistent conversation state - survives pause/resume
-let persistentConversationId = null;
-let hasActiveConversation = false;
-
 // Track if this is the first connection or a reconnection
 let isFirstConnection = true;
 let currentSessionId = null;
+let persistentConversationId = null;
+let hasHadFirstGreeting = false;
+let wasPausedManually = false;
 
 // Connection management
 let reconnectAttempts = 0;
@@ -63,7 +62,7 @@ function updateUI(listening) {
     agentStatus.classList.add('listening');
   } else {
     toggleButton.classList.remove('active');
-    agentStatus.textContent = hasActiveConversation ? 'Paused - Click to resume' : 'Ready to listen';
+    agentStatus.textContent = wasPausedManually ? 'Paused' : 'Ready to listen';
     agentStatus.classList.remove('listening');
   }
 }
@@ -71,7 +70,7 @@ function updateUI(listening) {
 // Toggle button click handler
 toggleButton.addEventListener('click', () => {
   if (isRecording) {
-    stopRecording(true); // Manual pause
+    stopRecording();
   } else {
     startRecording();
   }
@@ -90,6 +89,8 @@ async function startRecording() {
   }
   
   console.log('Starting with username:', username);
+  console.log('wasPausedManually:', wasPausedManually);
+  console.log('persistentConversationId:', persistentConversationId);
   
   isRecording = true;
   updateUI(true);
@@ -129,7 +130,7 @@ async function startRecording() {
       currentSessionId = Date.now();
     }
     
-    // Generate or reuse conversation ID - THIS IS KEY FOR PERSISTENCE
+    // Generate or reuse conversation ID (persists across manual pauses)
     if (!persistentConversationId) {
       persistentConversationId = currentSessionId;
       console.log('🆕 New conversation ID:', persistentConversationId);
@@ -137,21 +138,33 @@ async function startRecording() {
       console.log('🔄 Reusing conversation ID:', persistentConversationId);
     }
     
-    // Send start message with conversation state
+    // CRITICAL: Determine if we have messages
+    // If we paused manually OR if we have a persistent conversation ID that's not the current session
+    // then we should tell the server to load history
+    const hasMessages = wasPausedManually || (persistentConversationId !== currentSessionId);
+    
+    console.log('🔍 hasMessages determination:', {
+      wasPausedManually,
+      persistentConversationId,
+      currentSessionId,
+      hasMessages
+    });
+    
     ws.send(JSON.stringify({ 
       type: "start",
       username: username,
       sessionId: currentSessionId,
       conversationId: persistentConversationId,
       isReconnection: !isFirstConnection,
-      hasMessages: hasActiveConversation // Tell server we have conversation history
+      hasMessages: hasMessages
     }));
     
-    console.log(`📤 Sent start request - hasMessages: ${hasActiveConversation}`);
+    console.log('📤 Sent start message with hasMessages:', hasMessages);
     
     // Mark that first connection has been made
     if (isFirstConnection) {
       isFirstConnection = false;
+      hasHadFirstGreeting = true;
     }
 
     try {
@@ -252,18 +265,31 @@ async function startRecording() {
     
     // Update heartbeat timestamp
     lastHeartbeat = Date.now();
+    
+    // Remove any error messages on successful message
+    removeStatusError();
+    
+    // Debug logging (except audio deltas)
+    if (msg.type !== 'assistant_audio_delta') {
+      console.log('Server message:', msg.type);
+    }
+
+    if (msg.type === 'connection_ready') {
+      console.log('✅ Voice agent ready');
+    }
 
     if (msg.type === 'user_transcription') {
       console.log('User said:', msg.text);
-      // Mark that we now have conversation content
-      hasActiveConversation = true;
     }
 
     if (msg.type === 'assistant_transcript_delta') {
       if (!currentSpeechBubble) {
         currentSpeechBubble = document.createElement('div');
         currentSpeechBubble.className = 'speech-bubble';
-        currentSpeechBubble.innerHTML = '<span class="speech-text typing"></span>';
+        
+        const speechTextSpan = document.createElement('span');
+        speechTextSpan.className = 'speech-text typing';
+        currentSpeechBubble.appendChild(speechTextSpan);
         
         currentSpeechDiv.innerHTML = '';
         currentSpeechDiv.appendChild(currentSpeechBubble);
@@ -275,25 +301,41 @@ async function startRecording() {
       if (speechTextSpan) {
         speechTextSpan.textContent = currentSpeechText;
       }
-      
-      // Mark that we now have conversation content
-      hasActiveConversation = true;
     }
 
     if (msg.type === 'assistant_transcript_complete') {
-      const speechTextSpan = currentSpeechBubble?.querySelector('.speech-text');
-      if (speechTextSpan) {
-        speechTextSpan.classList.remove('typing');
+      if (currentSpeechBubble) {
+        const speechTextSpan = currentSpeechBubble.querySelector('.speech-text');
+        if (speechTextSpan) {
+          speechTextSpan.classList.remove('typing');
+          speechTextSpan.textContent = msg.text;
+        }
+        currentSpeechText = msg.text;
       }
+      // FIXED: Reset bubble reference so next response creates new bubble
+      currentSpeechBubble = null;
+      currentSpeechText = '';
     }
 
     if (msg.type === 'assistant_audio_delta') {
       playPCM16Audio(msg.audio);
     }
 
+    if (msg.type === 'response_complete') {
+      console.log('✅ Response complete');
+      if (currentSpeechBubble) {
+        const speechTextSpan = currentSpeechBubble.querySelector('.speech-text');
+        if (speechTextSpan) {
+          speechTextSpan.classList.remove('typing');
+        }
+      }
+      // FIXED: Reset bubble reference so next response creates new bubble
+      currentSpeechBubble = null;
+      currentSpeechText = '';
+    }
+
     if (msg.type === 'response_interrupted') {
       console.log('⚠️ Response interrupted by user');
-      
       stopAudioPlayback();
       
       if (currentSpeechBubble) {
@@ -303,21 +345,6 @@ async function startRecording() {
           speechTextSpan.classList.remove('typing');
         }
       }
-      
-      currentSpeechBubble = null;
-      currentSpeechText = '';
-    }
-
-    if (msg.type === 'response_complete') {
-      console.log('✅ Assistant response complete');
-      
-      const speechTextSpan = currentSpeechBubble?.querySelector('.speech-text');
-      if (speechTextSpan) {
-        speechTextSpan.classList.remove('typing');
-      }
-      
-      currentSpeechBubble = null;
-      currentSpeechText = '';
     }
 
     if (msg.type === 'error') {
@@ -326,37 +353,49 @@ async function startRecording() {
     }
   };
 
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-    showStatusError('Connection error. Attempting to reconnect...');
+  ws.onerror = (err) => {
+    console.error('WebSocket error:', err);
+    showStatusError('Connection error. Please try again.');
   };
 
   ws.onclose = () => {
     console.log('WebSocket closed');
     
-    stopHeartbeat();
-    
-    if (isRecording) {
-      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-        reconnectAttempts++;
-        console.log(`Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-        showStatusError(`Connection lost. Reconnecting... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-        
-        setTimeout(() => {
-          if (!isRecording) return;
-          startRecording();
-        }, RECONNECT_DELAY);
-      } else {
-        showStatusError('Connection lost. Please click to reconnect.');
-        cleanup(false);
-      }
+    if (isRecording && !wasPausedManually) {
+      showStatusError('Connection lost. Please check your internet.');
+      cleanup(false);
     }
   };
 }
 
-function stopRecording(isManualPause = false) {
-  console.log(`🛑 Stopping recording (manual pause: ${isManualPause})`);
+function stopRecording() {
+  console.log('🛑 Stop recording (manual pause)');
   
+  // CRITICAL: Set this flag BEFORE sending stop message
+  wasPausedManually = true;
+  console.log('✅ wasPausedManually flag set to:', wasPausedManually);
+  
+  // Send stop message WITHOUT requesting new session
+  // This allows resuming the same conversation
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      // FIXED: Don't request new session on pause
+      ws.send(JSON.stringify({ 
+        type: 'stop',
+        requestNewSession: false  // Keep the same conversation
+      }));
+      console.log('📤 Sent stop message with requestNewSession: false');
+    } catch (err) {
+      console.error('Error sending stop message:', err);
+    }
+  }
+  
+  // Clean up but keep conversation state
+  cleanup(true); // Manual pause
+}
+
+function cleanup(isManualPause = false) {
+  console.log('Cleaning up...', isManualPause ? '(manual pause)' : '(connection lost)');
   isRecording = false;
   updateUI(false);
 
@@ -380,43 +419,25 @@ function stopRecording(isManualPause = false) {
     audioContext.close();
     audioContext = null;
   }
-  
-  // Don't close TTS context so we can resume audio playback
-  // if (ttsAudioContext && ttsAudioContext.state !== 'closed') {
-  //   ttsAudioContext.close();
-  //   ttsAudioContext = null;
-  // }
-  
+  if (ttsAudioContext && ttsAudioContext.state !== 'closed') {
+    ttsAudioContext.close();
+    ttsAudioContext = null;
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
-    try {
-      // Send stop message WITHOUT requesting new session
-      ws.send(JSON.stringify({ 
-        type: 'stop'
-      }));
-      console.log('📤 Sent stop message - conversation will be preserved');
-    } catch (err) {
-      console.error('Error sending stop message:', err);
-    }
     ws.close();
   }
   
-  // Keep conversation state for resume
-  if (isManualPause) {
-    console.log('⏸️ Manual pause - conversation preserved for resume');
-    console.log(`   Conversation ID: ${persistentConversationId}`);
-    console.log(`   Has active conversation: ${hasActiveConversation}`);
-  }
-}
-
-function cleanup(preserveState = true) {
-  stopRecording(preserveState);
+  // Keep speech bubble visible
+  // Reset current speech state for next response
+  currentSpeechBubble = null;
+  currentSpeechText = '';
   
-  // Don't reset conversation state - allow resume
-  if (!preserveState) {
-    // Only reset if explicitly told to (e.g., on logout)
-    persistentConversationId = null;
-    hasActiveConversation = false;
-    isFirstConnection = true;
+  // If manually paused, keep everything for resume
+  // If connection lost, also keep state for reconnection
+  if (isManualPause) {
+    console.log('⏸️ Manual pause - ready to resume conversation');
+  } else {
+    console.log('🔌 Connection lost - session preserved for reconnection');
   }
 }
 
@@ -456,7 +477,7 @@ function removeStatusError() {
     agentStatus.textContent = 'Listening...';
     agentStatus.classList.add('listening');
   } else {
-    agentStatus.textContent = hasActiveConversation ? 'Paused - Click to resume' : 'Ready to listen';
+    agentStatus.textContent = wasPausedManually ? 'Paused' : 'Ready to listen';
   }
 }
 
@@ -619,6 +640,6 @@ window.addEventListener('beforeunload', (event) => {
     } catch (err) {
       console.error('Could not send emergency save on unload:', err);
     }
-    cleanup(true); // Preserve state on page unload
+    cleanup(true); // Treat page unload as manual pause
   }
 });
