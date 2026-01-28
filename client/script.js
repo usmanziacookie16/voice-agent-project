@@ -350,6 +350,18 @@ async function startRecording() {
       currentSpeechText = '';
     }
 
+    // Conversation restored from previous session
+    if (msg.type === 'conversation_restored') {
+      console.log(`✅ Conversation restored with ${msg.messageCount} previous messages`);
+      agentStatus.textContent = `Resumed (${msg.messageCount} messages loaded)`;
+      
+      // Clear the status after 3 seconds
+      setTimeout(() => {
+        if (isRecording) {
+          agentStatus.textContent = 'Listening...';
+        }
+      }, 3000);
+    }
     // Error handling
     if (msg.type === 'error') {
       showStatusError(msg.message);
