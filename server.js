@@ -399,10 +399,10 @@ Provide feedback on each answer provided by the user. The feedback should focus 
               type: 'server_vad',
               threshold: 0.6,
               prefix_padding_ms: 300,
-              silence_duration_ms: 1500
+              silence_duration_ms: 2000
             },
             temperature: 1.0,
-            max_response_output_tokens: '129'
+            max_response_output_tokens: 800
           }
         }));
 
