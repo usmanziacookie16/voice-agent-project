@@ -101,6 +101,43 @@ const RETRY_DELAY = 2000;
 // Track active sessions to prevent duplicates
 const activeSessions = new Map();
 
+// IMPROVED: Enhanced sanitization with better ellipsis handling
+function sanitizeText(text) {
+  if (!text) return '';
+  
+  let sanitized = text;
+  
+  // 1. First normalize any Unicode ellipsis to standard three dots
+  // This ensures "..." is displayed instead of "…"
+  sanitized = sanitized.replace(/\u2026/g, '...');
+  
+  // 2. Replace any 4+ consecutive dots with exactly 3 dots
+  // This prevents "....." from appearing during transcription
+  sanitized = sanitized.replace(/\.{4,}/g, '...');
+  
+  // 3. Remove control characters (invisible characters that can cause issues)
+  sanitized = sanitized.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+  
+  // 4. AGGRESSIVE FILTERING of non-Latin scripts
+  // This addresses the Unicode symbol issues your supervisor reported:
+  // - Cyrillic (0400-04FF)
+  // - Devanagari (0900-097F)
+  // - Kannada (0C80-0CFF) - This removes "ಇವರಾಂಸ"
+  // - Thai (0E00-0E7F)
+  // - CJK Unified Ideographs (2E80-9FFF) - This removes "娱乐网"
+  // - Hangul (AC00-D7AF)
+  // - Fullwidth forms (FF00-FFEF)
+  sanitized = sanitized.replace(/[\u0400-\u04FF\u0900-\u097F\u0C80-\u0CFF\u0E00-\u0E7F\u2E80-\u9FFF\uAC00-\uD7AF\uFF00-\uFFEF]/g, '');
+  
+  // 5. Remove emoji ranges (these can also cause display issues)
+  sanitized = sanitized.replace(/[\u{1F300}-\u{1F9FF}]/gu, '');
+  
+  // 6. Clean up any extra spaces that resulted from the removals above
+  sanitized = sanitized.replace(/\s+/g, ' ').trim();
+  
+  return sanitized;
+}
+
 // Helper function to retry operations
 async function retryOperation(operation, retries = MAX_RETRIES) {
   for (let i = 0; i < retries; i++) {
@@ -203,7 +240,7 @@ async function saveConversation(username, conversationId, messages, sessionId = 
               throw insertError;
             }
           } else {
-            console.log(`💾 Conversation saved to Supabase: ${username}_C (${messages.length} messages)`);
+            console.log(`💾 Conversation created in Supabase: ${username}_C (${messages.length} messages)`);
           }
         }
       });
@@ -335,7 +372,7 @@ wss.on('connection', async (clientWs) => {
       
       console.log(`👤 User: ${username} | Session: ${sessionId} | Conversation: ${conversationId} | Reconnection: ${isReconnection} | Has Messages: ${hasMessages}`);
       
-      // CRITICAL FIX: Load existing conversation from database if resuming
+      // Load existing conversation from database if resuming
       if (hasMessages || isReconnection) {
         console.log('🔄 Attempting to load previous conversation from database...');
         const loadedMessages = await loadConversation(username, conversationId);
@@ -406,9 +443,8 @@ Provide feedback on each answer provided by the user. The feedback should focus 
           }
         }));
 
-        // FIXED: Only send greeting on FIRST connection, not on resume or if has messages
+        // Only send greeting on FIRST connection
         if (!isReconnection && !hasMessages) {
-          // First time ever - initial greeting
           setTimeout(() => {
             console.log('🎤 Sending initial greeting (first time)');
             openaiWs.send(JSON.stringify({
@@ -437,18 +473,15 @@ Provide feedback on each answer provided by the user. The feedback should focus 
           console.log('🔄 Resuming conversation - restoring history...');
           console.log(`📊 Total messages to restore: ${conversationMessages.length}`);
           
-          // Wait for session.update to complete
           setTimeout(async () => {
             console.log(`📜 Restoring ${conversationMessages.length} messages to OpenAI context`);
             
             let restoredCount = 0;
             let skippedCount = 0;
             
-            // Restore previous messages to OpenAI (skip interrupted messages)
             for (let i = 0; i < conversationMessages.length; i++) {
               const msg = conversationMessages[i];
               
-              // Skip interrupted messages as they're incomplete
               if (msg.interrupted) {
                 console.log(`⏭️ Skipping interrupted message #${i}: "${msg.content.substring(0, 50)}..."`);
                 skippedCount++;
@@ -470,7 +503,6 @@ Provide feedback on each answer provided by the user. The feedback should focus 
                   }
                 }));
                 restoredCount++;
-                console.log(`   ✓ Restored user message #${i}`);
               } else if (msg.role === 'assistant') {
                 openaiWs.send(JSON.stringify({
                   type: 'conversation.item.create',
@@ -486,7 +518,6 @@ Provide feedback on each answer provided by the user. The feedback should focus 
                   }
                 }));
                 restoredCount++;
-                console.log(`   ✓ Restored assistant message #${i}`);
               }
             }
             
@@ -494,9 +525,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
             clientWs.send(JSON.stringify({ type: 'connection_ready' }));
           }, 500);
         } else {
-          // Reconnection but no messages found
-          console.log('⚠️ No conversation history to restore (conversationMessages.length = 0)');
-          console.log('⚠️ This indicates the conversation was not loaded from database');
+          console.log('⚠️ No conversation history to restore');
           clientWs.send(JSON.stringify({ type: 'connection_ready' }));
         }
       });
@@ -515,7 +544,9 @@ Provide feedback on each answer provided by the user. The feedback should focus 
             console.log('⚠️ Interrupting current response:', currentResponseId);
             
             currentAssistantMessage.interrupted = true;
-            currentAssistantMessage.content += '...';
+            // Sanitize the accumulated content before adding ellipsis
+            const sanitizedContent = sanitizeText(currentAssistantMessage.content);
+            currentAssistantMessage.content = sanitizedContent + '...';
             
             conversationMessages.push({
               sequence: messageSequence++,
@@ -546,12 +577,13 @@ Provide feedback on each answer provided by the user. The feedback should focus 
         }
 
         if (event.type === 'conversation.item.input_audio_transcription.completed') {
-          console.log('📝 Transcription:', event.transcript);
+          const sanitizedTranscript = sanitizeText(event.transcript);
+          console.log('📝 Transcription:', sanitizedTranscript);
           
           conversationMessages.push({
             sequence: messageSequence++,
             role: 'user',
-            content: event.transcript,
+            content: sanitizedTranscript,
             timestamp: new Date().toISOString()
           });
           
@@ -559,7 +591,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
             saveConversation(username, conversationId, conversationMessages, sessionId, true);
           }
           
-          clientWs.send(JSON.stringify({ type: 'user_transcription', text: event.transcript }));
+          clientWs.send(JSON.stringify({ type: 'user_transcription', text: sanitizedTranscript }));
         }
 
         if (event.type === 'response.created') {
@@ -576,25 +608,27 @@ Provide feedback on each answer provided by the user. The feedback should focus 
         }
 
         if (event.type === 'response.text.delta') {
+          // Don't sanitize deltas - send raw to preserve spacing
           currentAssistantMessage.content += event.delta;
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_delta', text: event.delta }));
         }
         
         if (event.type === 'response.audio_transcript.delta') {
+          // Don't sanitize deltas - send raw to preserve spacing
           currentAssistantMessage.content += event.delta;
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_delta', text: event.delta }));
         }
 
         if (event.type === 'response.audio_transcript.done') {
-          console.log('✅ Audio transcript complete:', event.transcript);
+          const sanitizedTranscript = sanitizeText(event.transcript);
+          console.log('✅ Audio transcript complete:', sanitizedTranscript);
           
-          if (event.transcript.length > currentAssistantMessage.content.length) {
-            currentAssistantMessage.content = event.transcript;
-          }
+          // Always use the complete sanitized transcript, not the accumulated deltas
+          currentAssistantMessage.content = sanitizedTranscript;
           
           clientWs.send(JSON.stringify({ 
             type: 'assistant_transcript_complete', 
-            text: event.transcript 
+            text: sanitizedTranscript 
           }));
         }
 
@@ -657,7 +691,6 @@ Provide feedback on each answer provided by the user. The feedback should focus 
         
         if (conversationMessages.length > 0 && username) {
           saveConversation(username, conversationId, conversationMessages, sessionId, true);
-          console.log(`📊 Final conversation stats for ${username}: ${conversationMessages.length} messages`);
         }
       });
     }
@@ -672,20 +705,12 @@ Provide feedback on each answer provided by the user. The feedback should focus 
       console.log(`🛑 Stop received (New session requested: ${requestNewSession})`);
       
       if (conversationMessages.length > 0 && username && conversationId) {
-        console.log(`💾 Saving conversation before stop: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
         await saveConversation(username, conversationId, conversationMessages, sessionId, true);
-        console.log(`✅ Conversation saved successfully`);
-      } else {
-        console.log('⚠️ No messages to save on stop');
       }
       
-      // FIXED: Always close OpenAI connection on stop (pause)
-      // When resuming, we'll restore the conversation history
       if (requestNewSession && sessionId) {
         activeSessions.delete(sessionId);
-        console.log(`🆕 Session ${sessionId} removed - next start will create NEW row`);
-      } else {
-        console.log('⏸️ Pausing - conversation will be restored on resume');
+        console.log(`🆕 Session ${sessionId} removed`);
       }
       
       if (openaiWs) {
@@ -710,29 +735,23 @@ Provide feedback on each answer provided by the user. The feedback should focus 
     }
     
     if (conversationMessages.length > 0 && username && conversationId) {
-      console.log(`💾 Final save on disconnect: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
       saveConversation(username, conversationId, conversationMessages, sessionId, true);
-      console.log(`📊 Final conversation stats for ${username}: ${conversationMessages.length} messages`);
     }
     
     if (sessionId) {
       setTimeout(() => {
         if (activeSessions.has(sessionId)) {
           activeSessions.delete(sessionId);
-          console.log(`🧹 Session cleaned up after disconnect: ${sessionId}`);
         }
       }, 5000);
     }
     
-    // Close OpenAI connection when client truly disconnects
     if (openaiWs) openaiWs.close();
   });
 
   clientWs.on('error', (err) => {
     console.error('Client WebSocket Error:', err.message);
-    
     if (conversationMessages.length > 0 && username && conversationId) {
-      console.log('⚠️ Emergency save due to client error');
       saveConversation(username, conversationId, conversationMessages, sessionId, true);
     }
   });
