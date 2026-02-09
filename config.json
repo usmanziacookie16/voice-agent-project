@@ -1,6 +1,0 @@
-{
-  "PORT": 3000,
-  "OPENAI_KEY": "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",
-  "SUPABASE_URL": "https://ukkgsugbmyzrqcpmmckk.supabase.co",
-  "SUPABASE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVra2dzdWdibXl6cnFjcG1tY2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxNDIxNDcsImV4cCI6MjA3OTcxODE0N30.HnfIsvP7ZtXMVRIz9x84pzHySx7JMs0vgQS3dA96cpA"
-}
