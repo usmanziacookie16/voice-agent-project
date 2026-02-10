@@ -303,10 +303,27 @@ async function startSession() {
       if (msg.type === 'history_restored') {
         console.log('✅ Conversation history restored');
       }
+
+      // 1) CLIENT-SIDE INTERRUPTION HANDLING
+      if (msg.type === 'speech_started') {
+        console.log('🎤 User started speaking (VAD)');
+        isUserSpeaking = true;
+        isAssistantSpeaking = false;
+        
+        // Critical: Stop playback immediately
+        stopAudioPlayback();
+        
+        // Optional: Reset UI to "Thinking" or "Listening" if needed
+        // For now, we leave the speech bubble as is until new transcription arrives
+      }
+
+      if (msg.type === 'speech_stopped') {
+        console.log('⏹️ User stopped speaking (VAD)');
+        isUserSpeaking = false;
+      }
       
       if (msg.type === 'user_transcription') {
         console.log('User said:', msg.text);
-        isUserSpeaking = true;
         
         conversationMessages.push({
           sequence: messageSequence++,
@@ -320,7 +337,7 @@ async function startSession() {
       if (msg.type === 'response_creating') {
         console.log('🤔 AI is thinking...');
         isThinkingState = true;
-        isUserSpeaking = false;
+        isUserSpeaking = false; // Reset flag
         
         // Reset text sync variables
         fullTranscriptText = '';
@@ -336,9 +353,11 @@ async function startSession() {
       }
       
       if (msg.type === 'assistant_transcript_delta') {
+        // Guard: Drop packets if user interrupted
+        if (isUserSpeaking) return;
+
         if (!isAssistantSpeaking) {
           isAssistantSpeaking = true;
-          isUserSpeaking = false;
         }
         
         // Remove thinking state
@@ -354,6 +373,8 @@ async function startSession() {
       }
       
       if (msg.type === 'assistant_transcript_complete') {
+        if (isUserSpeaking) return;
+
         // Ensure we display the complete text if audio is somehow done or skipped
         fullTranscriptText = msg.text;
         wordsToDisplay = fullTranscriptText.split(' ');
@@ -367,13 +388,16 @@ async function startSession() {
       }
       
       if (msg.type === "assistant_audio_delta") {
+        // Guard: Drop audio if user interrupted
+        if (isUserSpeaking) return;
+
         // Increment total chunks received for ratio calculation
         totalChunksReceived++;
         playPCM16Audio(msg.audio);
       }
       
       if (msg.type === 'response_interrupted') {
-        console.log('⛔ Interrupted');
+        console.log('⛔ Interrupted (Server Confirmed)');
         stopAudioPlayback();
         
         isAssistantSpeaking = false;
