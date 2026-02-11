@@ -55,6 +55,27 @@ let speechBubbleTimeout = null;
 let isUserSpeaking = false;
 let isAssistantSpeaking = false;
 
+// VAD (Voice Activity Detection) - Prevent stuck listening & filter claps
+let vadThreshold = 0.02; // Minimum audio level to consider as speech (higher = ignores brief sounds)
+let silenceDuration = 0;
+let maxSilenceDuration = 2500; // Max silence in ms before considering speech ended (2.5s)
+let vadCheckInterval = null;
+let lastAudioLevel = 0;
+let consecutiveSilenceChecks = 0;
+let isCurrentlyDetectingSpeech = false;
+let lastSpeechDetectedTime = 0;
+
+// Additional safety: listening state timeout
+let listeningStateTimeout = null;
+let maxListeningDuration = 30000; // 30 seconds max of continuous SILENCE (not speech)
+let listeningStateStartTime = 0;
+
+// Speech detection - require sustained audio to prevent claps/coughs triggering
+let minSpeechDuration = 300; // Minimum 300ms of sustained audio to consider it speech
+let speechStartTime = 0;
+let consecutiveSpeechFrames = 0;
+let minSpeechFrames = 3; // Need 3 consecutive frames above threshold (300ms at 100ms intervals)
+
 // Browser Detection
 function detectBrowser() {
   const userAgent = navigator.userAgent.toLowerCase();
@@ -268,6 +289,13 @@ async function startSession() {
         if (!isRecording || isPaused || !ws || ws.readyState !== WebSocket.OPEN) return;
         const input = e.inputBuffer.getChannelData(0);
         
+        // Calculate RMS (Root Mean Square) for audio level detection
+        let sum = 0;
+        for (let i = 0; i < input.length; i++) {
+          sum += input[i] * input[i];
+        }
+        lastAudioLevel = Math.sqrt(sum / input.length);
+        
         let resampledData = input;
         if (audioContext.sampleRate !== 24000) {
           resampledData = resampleAudio(input, audioContext.sampleRate, 24000);
@@ -282,6 +310,10 @@ async function startSession() {
           console.error('Error sending audio:', err);
         }
       };
+      
+      // Start VAD monitoring after audio setup
+      startVADMonitoring();
+      
     } catch (err) {
       console.error('Microphone error:', err);
       alert('Microphone Error: ' + err.message);
@@ -309,6 +341,26 @@ async function startSession() {
         console.log('🎤 User started speaking (VAD)');
         isUserSpeaking = true;
         isAssistantSpeaking = false;
+        listeningStateStartTime = Date.now();
+        
+        // Clear any existing listening timeout
+        if (listeningStateTimeout) {
+          clearTimeout(listeningStateTimeout);
+        }
+        
+        // Set a safety timeout - if stuck in listening state (no speech detected) for too long
+        // Note: This timeout gets reset when actual speech is detected by VAD
+        listeningStateTimeout = setTimeout(() => {
+          if (isUserSpeaking && ws && ws.readyState === WebSocket.OPEN) {
+            console.log(`⏱️ Listening state timeout (${maxListeningDuration}ms) - no speech detected`);
+            try {
+              ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+              isUserSpeaking = false;
+            } catch (e) {
+              console.error('Error forcing commit:', e);
+            }
+          }
+        }, maxListeningDuration);
         
         // Critical: Stop playback immediately
         stopAudioPlayback();
@@ -320,6 +372,12 @@ async function startSession() {
       if (msg.type === 'speech_stopped') {
         console.log('⏹️ User stopped speaking (VAD)');
         isUserSpeaking = false;
+        
+        // Clear listening timeout since speech has stopped
+        if (listeningStateTimeout) {
+          clearTimeout(listeningStateTimeout);
+          listeningStateTimeout = null;
+        }
       }
       
       if (msg.type === 'user_transcription') {
@@ -463,6 +521,8 @@ function pauseSession() {
   console.log('⏸️ Pausing session');
   isPaused = true;
   
+  stopVADMonitoring(); // Stop VAD when paused
+  
   // Suspend TTS Context to freeze audio in place
   if (ttsAudioContext && ttsAudioContext.state === 'running') {
     ttsAudioContext.suspend();
@@ -483,6 +543,8 @@ function resumeSession() {
   
   console.log('▶️ Resuming session');
   isPaused = false;
+  
+  startVADMonitoring(); // Restart VAD when resumed
   
   // Resume TTS Context
   if (ttsAudioContext && ttsAudioContext.state === 'suspended') {
@@ -529,6 +591,13 @@ function cleanup() {
   isPaused = false;
   
   stopHeartbeat();
+  stopVADMonitoring(); // Stop VAD monitoring
+  
+  // Clear listening timeout
+  if (listeningStateTimeout) {
+    clearTimeout(listeningStateTimeout);
+    listeningStateTimeout = null;
+  }
   
   if (processor) {
     processor.disconnect();
@@ -590,6 +659,96 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+// --- VAD MONITORING FUNCTIONS ---
+
+// VAD Monitoring - Detect when user stops speaking and filter brief sounds
+function startVADMonitoring() {
+  if (vadCheckInterval) return; // Already monitoring
+  
+  consecutiveSilenceChecks = 0;
+  consecutiveSpeechFrames = 0;
+  isCurrentlyDetectingSpeech = false;
+  lastSpeechDetectedTime = Date.now();
+  speechStartTime = 0;
+  
+  vadCheckInterval = setInterval(() => {
+    if (!isRecording || isPaused || !processor) {
+      stopVADMonitoring();
+      return;
+    }
+    
+    // Check audio level from the processor
+    const currentTime = Date.now();
+    const timeSinceLastSpeech = currentTime - lastSpeechDetectedTime;
+    
+    // If we detect audio above threshold
+    if (lastAudioLevel > vadThreshold) {
+      consecutiveSilenceChecks = 0;
+      consecutiveSpeechFrames++;
+      
+      // Only consider it speech if sustained for minimum duration
+      if (consecutiveSpeechFrames >= minSpeechFrames) {
+        lastSpeechDetectedTime = currentTime;
+        
+        // IMPORTANT: Reset the listening timeout when active speech is detected
+        // This allows unlimited continuous speaking
+        if (listeningStateTimeout && isCurrentlyDetectingSpeech) {
+          clearTimeout(listeningStateTimeout);
+          listeningStateTimeout = null;
+        }
+        
+        if (!isCurrentlyDetectingSpeech) {
+          isCurrentlyDetectingSpeech = true;
+          console.log('🎤 Speech detected (sustained audio)');
+        }
+      } else {
+        // Audio detected but not sustained yet - could be a clap or cough
+        if (!speechStartTime) {
+          speechStartTime = currentTime;
+        }
+      }
+    } else {
+      // Silence detected
+      consecutiveSilenceChecks++;
+      consecutiveSpeechFrames = 0; // Reset speech frame counter
+      speechStartTime = 0;
+      
+      // If we had speech before and now there's prolonged silence
+      if (isCurrentlyDetectingSpeech && timeSinceLastSpeech > maxSilenceDuration) {
+        console.log(`🔇 Silence detected for ${timeSinceLastSpeech}ms - assuming user stopped speaking`);
+        isCurrentlyDetectingSpeech = false;
+        
+        // Force commit the current speech by sending a manual trigger
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            // Send a commit event to force the API to process what it has
+            ws.send(JSON.stringify({ 
+              type: 'input_audio_buffer.commit' 
+            }));
+            console.log('📤 Sent manual commit due to silence detection');
+          } catch (e) {
+            console.error('Error sending commit:', e);
+          }
+        }
+      }
+    }
+  }, 100); // Check every 100ms
+  
+  console.log('👂 VAD monitoring started');
+}
+
+function stopVADMonitoring() {
+  if (vadCheckInterval) {
+    clearInterval(vadCheckInterval);
+    vadCheckInterval = null;
+    consecutiveSilenceChecks = 0;
+    consecutiveSpeechFrames = 0;
+    isCurrentlyDetectingSpeech = false;
+    speechStartTime = 0;
+    console.log('🛑 VAD monitoring stopped');
+  }
 }
 
 // --- AUDIO PLAYBACK ---
