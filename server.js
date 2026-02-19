@@ -380,7 +380,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
                 role: 'user',
                 content: [{
                   type: 'input_text',
-                  text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?"'
+                  text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on a term paper/essay/thesis/report you wrote. Can you describe your experience there?"'
                 }]
               }
             }));
