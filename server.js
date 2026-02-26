@@ -335,9 +335,9 @@ Provide feedback on each answer provided by the user. The feedback should focus 
             input_audio_transcription: { model: 'whisper-1' },
             turn_detection: { 
               type: 'server_vad', 
-              threshold: 0.75,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 2000
+              threshold: 0.80,
+              prefix_padding_ms: 500,
+              silence_duration_ms: 3000
             },
             temperature: 1.0,
             max_response_output_tokens: 800
