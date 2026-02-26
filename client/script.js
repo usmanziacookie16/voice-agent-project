@@ -56,9 +56,9 @@ let isUserSpeaking = false;
 let isAssistantSpeaking = false;
 
 // VAD (Voice Activity Detection) - Prevent stuck listening & filter claps
-let vadThreshold = 0.02; // Minimum audio level to consider as speech (higher = ignores brief sounds)
+let vadThreshold = 0.05; // Minimum audio level to consider as speech (higher = ignores brief sounds)
 let silenceDuration = 0;
-let maxSilenceDuration = 2500; // Max silence in ms before considering speech ended (2.5s)
+let maxSilenceDuration = 3500; // Max silence in ms before considering speech ended (2.5s)
 let vadCheckInterval = null;
 let lastAudioLevel = 0;
 let consecutiveSilenceChecks = 0;
@@ -74,7 +74,7 @@ let listeningStateStartTime = 0;
 let minSpeechDuration = 300; // Minimum 300ms of sustained audio to consider it speech
 let speechStartTime = 0;
 let consecutiveSpeechFrames = 0;
-let minSpeechFrames = 3; // Need 3 consecutive frames above threshold (300ms at 100ms intervals)
+let minSpeechFrames = 6; // Need 3 consecutive frames above threshold (300ms at 100ms intervals)
 
 // Browser Detection
 function detectBrowser() {
