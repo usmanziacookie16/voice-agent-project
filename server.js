@@ -298,14 +298,13 @@ wss.on('connection', async (clientWs) => {
         console.log(`🆕 Using conversation: ${conversationId}`);
       }
       
-      const model = 'gpt-4o-realtime-preview';
+      const model = 'gpt-realtime-mini';
       const url = `wss://api.openai.com/v1/realtime?model=${model}`;
       const { default: WebSocket } = await import('ws');
 
       openaiWs = new WebSocket(url, {
         headers: {
-          'Authorization': `Bearer ${config.OPENAI_KEY}`,
-          'OpenAI-Beta': 'realtime=v1'
+          'Authorization': `Bearer ${config.OPENAI_KEY}`
         }
       });
 
@@ -316,7 +315,7 @@ wss.on('connection', async (clientWs) => {
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
-            modalities: ['text', 'audio'],
+            type: 'realtime',
             instructions: `Act as a facilitator to help the user write a self-reflection. The user recently wrote a term paper. Your task is to facilitate the user writing the self-reflection via multi-turn dialogue
 You will ask open-ended questions that should align with the six stages of Gibbs' Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs' Reflective Cycle throughout the session.
  
@@ -333,18 +332,23 @@ Ask follow-up questions if the response is brief or lacks detail. Please ask at 
 Do Not Respond with more than 1-3 sentences or questions. Always respond in English Language.
  
 Provide feedback on each answer provided by the user. The feedback should focus on the level of reflection rather than the content of the experience. Encourage, supervise, and incorporate social and personal values.`,
-            voice: 'alloy',
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            input_audio_transcription: { model: 'whisper-1' },
-            turn_detection: { 
-              type: 'server_vad', 
-              threshold: 0.8,
-              prefix_padding_ms: 500,
-              silence_duration_ms: 3000
+            audio: {
+              input: {
+                format: { type: 'audio/pcm', rate: 24000 },
+                transcription: { model: 'whisper-1' },
+                turn_detection: {
+                  type: 'server_vad',
+                  threshold: 0.8,
+                  prefix_padding_ms: 500,
+                  silence_duration_ms: 3000
+                }
+              },
+              output: {
+                format: { type: 'audio/pcm', rate: 24000 },
+                voice: 'alloy'
+              }
             },
-            temperature: 1.0,
-            max_response_output_tokens: 800
+            max_output_tokens: 800
           }
         }));
 
@@ -390,8 +394,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
             }));
             
             openaiWs.send(JSON.stringify({
-              type: 'response.create',
-              response: { modalities: ['text', 'audio'] }
+              type: 'response.create'
             }));
           }, 500);
         } else {
@@ -404,7 +407,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
         
         if (event.type && !event.type.includes('audio.delta') && !event.type.includes('input_audio_buffer.append')) {
           // Reduce log noise
-          if (event.type !== 'response.audio_transcript.delta' && event.type !== 'response.text.delta') {
+          if (event.type !== 'response.output_audio_transcript.delta' && event.type !== 'response.output_text.delta') {
              console.log('Event:', event.type);
           }
         }
@@ -485,17 +488,17 @@ Provide feedback on each answer provided by the user. The feedback should focus 
           };
         }
 
-        if (event.type === 'response.text.delta') {
+        if (event.type === 'response.output_text.delta') {
           currentAssistantMessage.content += event.delta;
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_delta', text: event.delta }));
         }
         
-        if (event.type === 'response.audio_transcript.delta') {
+        if (event.type === 'response.output_audio_transcript.delta') {
           currentAssistantMessage.content += event.delta;
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_delta', text: event.delta }));
         }
 
-        if (event.type === 'response.audio_transcript.done') {
+        if (event.type === 'response.output_audio_transcript.done') {
           console.log('✅ Audio transcript complete:', event.transcript);
           
           if (event.transcript.length > currentAssistantMessage.content.length) {
@@ -505,7 +508,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
           clientWs.send(JSON.stringify({ type: 'assistant_transcript_complete', text: event.transcript }));
         }
 
-        if (event.type === 'response.audio.delta') {
+        if (event.type === 'response.output_audio.delta') {
           clientWs.send(JSON.stringify({ type: 'assistant_audio_delta', audio: event.delta }));
         }
 
