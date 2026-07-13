@@ -25,6 +25,25 @@ if (!config.OPENAI_KEY || !config.SUPABASE_URL || !config.SUPABASE_KEY) {
   process.exit(1);
 }
 
+// FIX: agent behavior (model, voice, prompt) now lives in its own plain-JSON
+// file so non-technical team members can edit the AI's model or prompt
+// without touching any JavaScript code.
+let agentConfig = {
+  model: 'gpt-realtime-mini',
+  voice: 'alloy',
+  greeting: 'Say "Hello, how can I help you today?"',
+  instructions: 'You are a helpful assistant.'
+};
+
+try {
+  const rawAgentConfig = fs.readFileSync('./agent-config.json', 'utf8');
+  agentConfig = { ...agentConfig, ...JSON.parse(rawAgentConfig) };
+  console.log(`🧠 Loaded agent-config.json — model: ${agentConfig.model}, voice: ${agentConfig.voice}`);
+} catch (error) {
+  console.error('⚠️ Could not read/parse agent-config.json — using built-in defaults.');
+  console.error('   Check that the file exists and is valid JSON:', error.message);
+}
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -240,6 +259,17 @@ function saveFallbackLocal(username, conversationId, conversationData) {
   }
 }
 
+// FIX: user speech transcription completes asynchronously in the GA Realtime
+// API, so messages can be pushed out of chronological order (the assistant's
+// next turn may finish and get pushed before the prior user turn's
+// transcription comes back). Re-sort by timestamp and reassign sequence
+// numbers every time the array changes so `sequence` always reflects true
+// chronological order rather than push order.
+function resequenceMessages(messages) {
+  messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  messages.forEach((m, idx) => { m.sequence = idx; });
+}
+
 wss.on('connection', async (clientWs) => {
   console.log('Client connected');
   
@@ -247,7 +277,6 @@ wss.on('connection', async (clientWs) => {
   let conversationId = null;
   let sessionId = null;
   const conversationMessages = [];
-  let messageSequence = 0;
   
   let openaiWs = null;
   let activeResponse = false;
@@ -287,7 +316,7 @@ wss.on('connection', async (clientWs) => {
       // If we received previous messages (resuming a session), populate local array
       if (previousMessages.length > 0 && conversationMessages.length === 0) {
         previousMessages.forEach(m => conversationMessages.push(m));
-        messageSequence = conversationMessages.length;
+        resequenceMessages(conversationMessages);
         console.log(`📥 Loaded ${conversationMessages.length} messages into local memory`);
       }
 
@@ -298,7 +327,7 @@ wss.on('connection', async (clientWs) => {
         console.log(`🆕 Using conversation: ${conversationId}`);
       }
       
-      const model = 'gpt-realtime-mini';
+      const model = agentConfig.model;
       const url = `wss://api.openai.com/v1/realtime?model=${model}`;
       const { default: WebSocket } = await import('ws');
 
@@ -316,22 +345,7 @@ wss.on('connection', async (clientWs) => {
           type: 'session.update',
           session: {
             type: 'realtime',
-            instructions: `Act as a facilitator to help the user write a self-reflection. The user recently wrote a term paper. Your task is to facilitate the user writing the self-reflection via multi-turn dialogue
-You will ask open-ended questions that should align with the six stages of Gibbs' Reflective Cycle in this order: Description, Feelings, Evaluation, Analysis, Conclusion, and Action Plan. You are to remain implicit regarding the phases of Gibbs' Reflective Cycle throughout the session.
- 
-At the start of each phase, ask one of the following questions in this order and with exactly the same wording as they are written below:
-1. Can you describe the process of writing your term paper, from planning to completion?
-2. How did you feel while working on the term paper, especially during challenging moments?
-3. What aspects of your term paper do you think went well, and what didn't work as effectively?
-4. Why do you think certain parts of the process were successful or unsuccessful? Were there any factors or strategies that contributed to the outcome?
-5. What have you learned from writing this term paper, both about the subject and your own writing process?
-6. What will you do differently in your next term paper to improve your approach and results?
- 
- 
-Ask follow-up questions if the response is brief or lacks detail. Please ask at least one follow-up question per phase and not more than three follow-up questions per phase. Ask specific questions rather than generic questions. Request specific examples from the user. If the student mentions a shift in views, prompt him for examples from his experience that illustrate this change. Do not give any examples and don't do the reflection for the user.
-Do Not Respond with more than 1-3 sentences or questions. Always respond in English Language.
- 
-Provide feedback on each answer provided by the user. The feedback should focus on the level of reflection rather than the content of the experience. Encourage, supervise, and incorporate social and personal values.`,
+            instructions: agentConfig.instructions,
             audio: {
               input: {
                 format: { type: 'audio/pcm', rate: 24000 },
@@ -345,7 +359,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
               },
               output: {
                 format: { type: 'audio/pcm', rate: 24000 },
-                voice: 'alloy'
+                voice: agentConfig.voice
               }
             },
             max_output_tokens: 800
@@ -388,7 +402,7 @@ Provide feedback on each answer provided by the user. The feedback should focus 
                 role: 'user',
                 content: [{
                   type: 'input_text',
-                  text: 'Say "Hello there, I am Lexi. I am here to assist you in writing the self-reflection on the term paper you wrote. Can you describe your experience there?"'
+                  text: agentConfig.greeting
                 }]
               }
             }));
@@ -426,12 +440,13 @@ Provide feedback on each answer provided by the user. The feedback should focus 
             currentAssistantMessage.content += '...';
             
             conversationMessages.push({
-              sequence: messageSequence++,
+              sequence: 0, // corrected below by resequenceMessages
               role: currentAssistantMessage.role,
               content: currentAssistantMessage.content,
               timestamp: currentAssistantMessage.timestamp,
               interrupted: true
             });
+            resequenceMessages(conversationMessages);
             
             if (username) {
               saveConversation(username, conversationId, conversationMessages, sessionId, true);
@@ -456,11 +471,12 @@ Provide feedback on each answer provided by the user. The feedback should focus 
           // FIX: use pendingUserTimestamp (set at speech_started) instead of
           // new Date() here, which would be later than response.created
           conversationMessages.push({
-            sequence: messageSequence++,
+            sequence: 0, // corrected below by resequenceMessages
             role: 'user',
             content: event.transcript,
             timestamp: pendingUserTimestamp || new Date().toISOString()
           });
+          resequenceMessages(conversationMessages);
           pendingUserTimestamp = null; // reset for next turn
           
           if (username) {
@@ -519,12 +535,13 @@ Provide feedback on each answer provided by the user. The feedback should focus 
           
           if (currentAssistantMessage.content.trim() !== '') {
             conversationMessages.push({
-              sequence: messageSequence++,
+              sequence: 0, // corrected below by resequenceMessages
               role: currentAssistantMessage.role,
               content: currentAssistantMessage.content,
               timestamp: currentAssistantMessage.timestamp,
               interrupted: false
             });
+            resequenceMessages(conversationMessages);
             
             if (username) {
               saveConversation(username, conversationId, conversationMessages, sessionId, true);
