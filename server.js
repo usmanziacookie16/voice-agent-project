@@ -32,7 +32,13 @@ let agentConfig = {
   model: 'gpt-realtime-mini',
   voice: 'alloy',
   greeting: 'Say "Hello, how can I help you today?"',
-  instructions: 'You are a helpful assistant.'
+  instructions: 'You are a helpful assistant.',
+  transcription_model: 'whisper-1',
+  audio_sample_rate: 24000,
+  vad_threshold: 0.8,
+  vad_prefix_padding_ms: 500,
+  vad_silence_duration_ms: 3000,
+  max_output_tokens: 800
 };
 
 try {
@@ -179,7 +185,7 @@ async function saveConversation(username, conversationId, messages, sessionId = 
     conversation_id: conversationId,
     condition: 'C',
     timestamp: new Date().toISOString(),
-    messages: messages,
+    messages: stripTimestampsForStorage(messages),
     total_messages: messages.length,
     updated_at: new Date().toISOString()
   };
@@ -266,8 +272,31 @@ function saveFallbackLocal(username, conversationId, conversationData) {
 // numbers every time the array changes so `sequence` always reflects true
 // chronological order rather than push order.
 function resequenceMessages(messages) {
-  messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-  messages.forEach((m, idx) => { m.sequence = idx; });
+  messages.sort((a, b) => {
+    // Prefer the precise millisecond timestamp when both sides have one
+    // (always true for messages created in the current live session).
+    if (a.timestamp && b.timestamp) {
+      return new Date(a.timestamp) - new Date(b.timestamp);
+    }
+    // Fallback for messages restored from storage, which no longer carry
+    // `timestamp` (only `time`, HH:MM:SS) — fine as long as a session
+    // doesn't span midnight.
+    return (a.time || '').localeCompare(b.time || '');
+  });
+  messages.forEach((m, idx) => {
+    m.sequence = idx;
+    // Human-readable clock time (HH:MM:SS, same UTC time as `timestamp`)
+    // for people reading the transcript who don't need the full ISO date.
+    if (m.timestamp) m.time = m.timestamp.slice(11, 19);
+  });
+}
+
+// Strip the verbose ISO `timestamp` field before persisting/displaying —
+// `time` (HH:MM:SS) is kept as the human-readable equivalent. The full
+// timestamp stays in the in-memory `conversationMessages` array for the
+// live session (needed for precise ordering); only the saved copy omits it.
+function stripTimestampsForStorage(messages) {
+  return messages.map(({ timestamp, ...rest }) => rest);
 }
 
 wss.on('connection', async (clientWs) => {
@@ -348,21 +377,21 @@ wss.on('connection', async (clientWs) => {
             instructions: agentConfig.instructions,
             audio: {
               input: {
-                format: { type: 'audio/pcm', rate: 24000 },
-                transcription: { model: 'whisper-1' },
+                format: { type: 'audio/pcm', rate: agentConfig.audio_sample_rate },
+                transcription: { model: agentConfig.transcription_model },
                 turn_detection: {
                   type: 'server_vad',
-                  threshold: 0.8,
-                  prefix_padding_ms: 500,
-                  silence_duration_ms: 3000
+                  threshold: agentConfig.vad_threshold,
+                  prefix_padding_ms: agentConfig.vad_prefix_padding_ms,
+                  silence_duration_ms: agentConfig.vad_silence_duration_ms
                 }
               },
               output: {
-                format: { type: 'audio/pcm', rate: 24000 },
+                format: { type: 'audio/pcm', rate: agentConfig.audio_sample_rate },
                 voice: agentConfig.voice
               }
             },
-            max_output_tokens: 800
+            max_output_tokens: agentConfig.max_output_tokens
           }
         }));
 
