@@ -33,6 +33,7 @@ let agentConfig = {
   voice: 'alloy',
   greeting: 'Say "Hello, how can I help you today?"',
   instructions: 'You are a helpful assistant.',
+  condition: 'C',
   transcription_model: 'whisper-1',
   audio_sample_rate: 24000,
   vad_threshold: 0.8,
@@ -160,12 +161,12 @@ async function saveConversation(username, conversationId, messages, sessionId = 
     const now = Date.now();
     
     if (session.messageCount === messages.length) {
-      console.log(`⏭️ Skipped save (no new messages): ${username}_C`);
+      console.log(`⏭️ Skipped save (no new messages): ${username}_${agentConfig.condition}`);
       return;
     }
     
     if (session.lastSaveTime && (now - session.lastSaveTime) < 1000) {
-      console.log(`⏭️ Skipped save (debounce): ${username}_C`);
+      console.log(`⏭️ Skipped save (debounce): ${username}_${agentConfig.condition}`);
       return;
     }
     
@@ -183,7 +184,7 @@ async function saveConversation(username, conversationId, messages, sessionId = 
   const conversationData = {
     username: username,
     conversation_id: conversationId,
-    condition: 'C',
+    condition: agentConfig.condition,
     timestamp: new Date().toISOString(),
     messages: stripTimestampsForStorage(messages),
     total_messages: messages.length,
@@ -213,9 +214,9 @@ async function saveConversation(username, conversationId, messages, sessionId = 
               .eq('conversation_id', conversationId);
             
             if (updateError) throw updateError;
-            console.log(`💾 Conversation updated in Supabase: ${username}_C (${messages.length} messages)`);
+            console.log(`💾 Conversation updated in Supabase: ${username}_${agentConfig.condition} (${messages.length} messages)`);
           } else {
-            console.log(`⏭️ Skipped update (no new messages): ${username}_C`);
+            console.log(`⏭️ Skipped update (no new messages): ${username}_${agentConfig.condition}`);
           }
         } else {
           const { error: insertError } = await supabase
@@ -224,12 +225,12 @@ async function saveConversation(username, conversationId, messages, sessionId = 
           
           if (insertError) {
             if (insertError.code === '23505') {
-              console.log(`⚠️ Conversation already exists (race condition avoided): ${username}_C`);
+              console.log(`⚠️ Conversation already exists (race condition avoided): ${username}_${agentConfig.condition}`);
             } else {
               throw insertError;
             }
           } else {
-            console.log(`💾 Conversation saved to Supabase: ${username}_C (${messages.length} messages)`);
+            console.log(`💾 Conversation saved to Supabase: ${username}_${agentConfig.condition} (${messages.length} messages)`);
           }
         }
       });
@@ -248,7 +249,7 @@ function saveFallbackLocal(username, conversationId, conversationData) {
     if (!fs.existsSync(conversationsDir)) {
       fs.mkdirSync(conversationsDir);
     }
-    const filename = `${conversationsDir}/${username}_C_${conversationId}.json`;
+    const filename = `${conversationsDir}/${username}_${agentConfig.condition}_${conversationId}.json`;
     
     if (fs.existsSync(filename)) {
       const existing = JSON.parse(fs.readFileSync(filename));
@@ -627,7 +628,7 @@ wss.on('connection', async (clientWs) => {
       console.log(`🛑 Stop received (New session requested: ${requestNewSession})`);
       
       if (conversationMessages.length > 0 && username && conversationId) {
-        console.log(`💾 Saving conversation before stop: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
+        console.log(`💾 Saving conversation before stop: ${username}_${agentConfig.condition}_${conversationId} (${conversationMessages.length} messages)`);
         await saveConversation(username, conversationId, conversationMessages, sessionId, true);
         console.log(`✅ Conversation saved successfully`);
       } else {
@@ -660,7 +661,7 @@ wss.on('connection', async (clientWs) => {
     }
     
     if (conversationMessages.length > 0 && username && conversationId) {
-      console.log(`💾 Final save on disconnect: ${username}_C_${conversationId} (${conversationMessages.length} messages)`);
+      console.log(`💾 Final save on disconnect: ${username}_${agentConfig.condition}_${conversationId} (${conversationMessages.length} messages)`);
       saveConversation(username, conversationId, conversationMessages, sessionId, true);
       console.log(`📊 Final conversation stats for ${username}: ${conversationMessages.length} messages`);
     }
