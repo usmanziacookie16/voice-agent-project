@@ -9,5 +9,6 @@
   "vad_threshold": 0.8,
   "vad_prefix_padding_ms": 500,
   "vad_silence_duration_ms": 3000,
-  "max_output_tokens": 800
+  "max_output_tokens": 800,
+  "voice_speed": 1
 }
