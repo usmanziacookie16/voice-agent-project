@@ -25,8 +25,9 @@ if (!config.OPENAI_KEY || !config.SUPABASE_URL || !config.SUPABASE_KEY) {
   process.exit(1);
 }
 
-// FIX: agent behavior (model, voice, prompt) now lives in its own JSON file as Agent Config.json
-
+// FIX: agent behavior (model, voice, prompt) now lives in its own plain-JSON
+// file so non-technical team members can edit the AI's model or prompt
+// without touching any JavaScript code.
 let agentConfig = {
   model: 'gpt-realtime-mini',
   voice: 'alloy',
@@ -38,7 +39,8 @@ let agentConfig = {
   vad_threshold: 0.8,
   vad_prefix_padding_ms: 500,
   vad_silence_duration_ms: 3000,
-  max_output_tokens: 800
+  max_output_tokens: 800,
+  voice_speed: 1.0
 };
 
 try {
@@ -388,7 +390,8 @@ wss.on('connection', async (clientWs) => {
               },
               output: {
                 format: { type: 'audio/pcm', rate: agentConfig.audio_sample_rate },
-                voice: agentConfig.voice
+                voice: agentConfig.voice,
+                speed: agentConfig.voice_speed
               }
             },
             max_output_tokens: agentConfig.max_output_tokens
