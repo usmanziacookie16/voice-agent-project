@@ -25,9 +25,8 @@ if (!config.OPENAI_KEY || !config.SUPABASE_URL || !config.SUPABASE_KEY) {
   process.exit(1);
 }
 
-// FIX: agent behavior (model, voice, prompt) now lives in its own plain-JSON
-// file so non-technical team members can edit the AI's model or prompt
-// without touching any JavaScript code.
+// FIX: agent behavior (model, voice, prompt) now lives in its own JSON file as Agent Config.json
+
 let agentConfig = {
   model: 'gpt-realtime-mini',
   voice: 'alloy',
