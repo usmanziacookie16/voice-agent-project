@@ -12,6 +12,5 @@ create table conversations (
   condition text,
   messages jsonb,
   total_messages int,
-  updated_at timestamptz,
   unique (username, conversation_id)
 );
