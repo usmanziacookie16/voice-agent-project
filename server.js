@@ -188,7 +188,7 @@ async function saveConversation(username, conversationId, messages, sessionId = 
     condition: agentConfig.condition,
     messages: stripTimestampsForStorage(messages),
     total_messages: messages.length,
-    updated_at: new Date().toISOString()
+    
   };
   
   try {
@@ -286,9 +286,9 @@ function resequenceMessages(messages) {
   });
   messages.forEach((m, idx) => {
     m.sequence = idx;
-    // Human-readable clock time (HH:MM:SS, same UTC time as `timestamp`)
-    // for people reading the transcript who don't need the full ISO date.
-    if (m.timestamp) m.time = m.timestamp.slice(11, 19);
+    // Human-readable clock time
+    
+    if (m.timestamp) m.time = m.timestamp.slice(0, 19);
   });
 }
 
